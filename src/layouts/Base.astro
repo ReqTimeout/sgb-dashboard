@@ -1,0 +1,49 @@
+---
+import "@fontsource-variable/manrope";
+import "@fontsource-variable/plus-jakarta-sans";
+import "@fontsource-variable/inter";
+import "@fontsource/geist-mono";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+const user = Astro.locals.user;
+---
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · SGB Dashboard</title>
+  </head>
+  <body class="font-body bg-slate-50 text-slate-900 antialiased">
+    <header class="border-b border-slate-200 bg-white">
+      <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+        <a href="/" class="font-heading text-lg font-extrabold tracking-tight">
+          <span class="text-brand-600">SGB</span> Dashboard
+          <span class="ml-2 rounded bg-slate-100 px-2 py-0.5 font-mono-num text-[11px] font-medium text-slate-500">P0 skeleton</span>
+        </a>
+        <nav class="flex items-center gap-3 text-sm">
+          {user ? (
+            <>
+              <span class="hidden text-slate-500 sm:inline">{user.email} · {user.role}</span>
+              <form method="post" action="/api/auth/logout">
+                <button class="rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-100" type="submit">Keluar</button>
+              </form>
+            </>
+          ) : (
+            <a class="rounded-lg bg-brand-600 px-3 py-1.5 font-semibold text-white" href="/login">Masuk</a>
+          )}
+        </nav>
+      </div>
+    </header>
+    <main class="mx-auto max-w-5xl px-4 py-8">
+      <slot />
+    </main>
+    <footer class="mx-auto max-w-5xl px-4 pb-8 text-xs text-slate-400">
+      Powered by Beriklan Agency · P0 skeleton — data live menyusul di P1
+    </footer>
+  </body>
+</html>

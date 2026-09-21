@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-brand-600: #dc2626;
+  --color-brand-700: #b91c1c;
+  --color-safety-400: #facc15;
+  --color-wa-500: #25d366;
+  --font-display: "Manrope", system-ui, sans-serif;
+  --font-heading: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono-num: "Geist Mono", ui-monospace, monospace;
+}

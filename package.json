@@ -1,0 +1,47 @@
+{
+  "name": "sgb-dashboard",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Beriklan agency + client dashboard (sgb.beriklan.co.id). Astro 7 SSR + Svelte 5 + Tailwind 4 + Drizzle MySQL. Deploy: Coolify VPS project agency-beriklan.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev --port 4323 --host 127.0.0.1",
+    "build": "astro build",
+    "start": "node ./dist/server/entry.mjs",
+    "preview": "astro preview --port 4323",
+    "check": "astro check",
+    "astro": "astro",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.1.5",
+    "@astrojs/svelte": "^9.0.1",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "@fontsource/geist-mono": "^5.3.0",
+    "@lucide/svelte": "^1.45.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "mysql2": "^3.15.0",
+    "svelte": "^5.57.0",
+    "svelte-sonner": "^1.2.1",
+    "tailwindcss": "^4.3.3",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@types/bcryptjs": "^3.0.0",
+    "drizzle-kit": "^0.31.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0"
+  }
+}

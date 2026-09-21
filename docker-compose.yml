@@ -1,0 +1,16 @@
+# Compose untuk DEV LOKAL saja. Di Coolify pakai resource UI (app + MySQL terpisah).
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: sgb_dashboard
+      MYSQL_USER: sgb
+      MYSQL_PASSWORD: sgb_dev_only
+    ports:
+      - "3307:3306"
+    volumes:
+      - sgb-mysql-dev:/var/lib/mysql
+
+volumes:
+  sgb-mysql-dev:
