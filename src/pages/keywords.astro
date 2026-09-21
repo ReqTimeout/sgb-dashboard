@@ -1,0 +1,64 @@
+---
+import Base from "../layouts/Base.astro";
+import { getRequestTenant } from "../lib/data";
+import { desc, eq } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { keywordInventory } from "../../drizzle/schema";
+import { fmtInt } from "../lib/insights";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+const filter = Astro.url.searchParams.get("status") ?? "";
+
+const db = getDb();
+const rows = await db
+  .select()
+  .from(keywordInventory)
+  .where(eq(keywordInventory.tenantId, tenant.id))
+  .orderBy(desc(keywordInventory.priority))
+  .limit(300);
+const list = filter ? rows.filter((r) => r.status === filter) : rows;
+
+const counts: Record<string, number> = {};
+for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+const order = ["antre", "draft", "terbit", "ter-commit", "diajukan"];
+const chip: Record<string, string> = {
+  antre: "bg-slate-100 text-slate-600",
+  draft: "bg-amber-50 text-amber-700",
+  terbit: "bg-sky-50 text-sky-700",
+  "ter-commit": "bg-violet-50 text-violet-700",
+  diajukan: "bg-emerald-50 text-emerald-700",
+};
+---
+<Base title="Keyword Inventory">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">Keyword Inventory</h1>
+  <p class="mt-1 text-sm text-slate-500">
+    {tenant.name} · {fmtInt(rows.length)} keyword terlacak: mana yang sudah jadi artikel, mana yang belum, progres sampai terindex.
+  </p>
+
+  <div class="mt-4 flex flex-wrap gap-2 text-sm">
+    <a href="/keywords" class={`rounded-full px-3 py-1 ${!filter ? "bg-brand-600 text-white font-bold" : "bg-slate-100"}`}>Semua ({rows.length})</a>
+    {order.map((s) => counts[s] ? (
+      <a href={`/keywords?status=${s}`} class={`rounded-full px-3 py-1 ${filter === s ? "bg-brand-600 text-white font-bold" : "bg-slate-100"}`}>{s} ({counts[s]})</a>
+    ) : null)}
+  </div>
+
+  <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+    <table class="w-full min-w-[560px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-400"><th class="px-4 py-2">Keyword</th><th class="px-2 py-2">Status</th><th class="px-2 py-2">Artikel</th><th class="px-4 py-2 text-right">Prioritas</th></tr></thead>
+      <tbody>
+        {list.length === 0 && <tr><td colspan="4" class="px-4 py-8 text-center text-slate-400">Belum ada data — snapshot keyword pertama jalan 05:10 WIB.</td></tr>}
+        {list.map((r) => (
+          <tr class="border-t border-slate-100">
+            <td class="px-4 py-2 font-medium">{r.keyword}</td>
+            <td class="px-2 py-2"><span class={`rounded-full px-2 py-0.5 text-xs font-bold ${chip[r.status] ?? "bg-slate-100 text-slate-600"}`}>{r.status}</span></td>
+            <td class="px-2 py-2 font-mono-num text-xs text-slate-500">{r.articleSlug ?? "—"}</td>
+            <td class="px-4 py-2 text-right font-mono-num">{r.priority}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-2 text-xs text-slate-400">Rantai status: antre → draft → terbit → ter-commit → diajukan (submit Google). Snapshot harian 05:10 WIB.</p>
+</Base>

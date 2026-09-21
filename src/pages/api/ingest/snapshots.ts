@@ -2,7 +2,7 @@ import type { APIRoute } from "astro";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../../../lib/db";
-import { articlesView, rankSnapshots, tenants } from "../../../../drizzle/schema";
+import { articlesView, keywordInventory, rankSnapshots, tenants } from "../../../../drizzle/schema";
 import { createHash } from "node:crypto";
 
 // Ingest snapshots: rank keyword harian + snapshot artikel. Idempotent per (tenant, date):
@@ -22,10 +22,17 @@ const Article = z.object({
   indexed_at: z.string().nullable().optional(),
   cover_url: z.string().max(512).nullable().optional(),
 });
+const Keyword = z.object({
+  keyword: z.string().max(255),
+  status: z.string().max(32),
+  article_slug: z.string().max(255).nullable().optional(),
+  priority: z.number().nullable().optional(),
+});
 const Body = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   ranks: z.array(Rank).max(200).optional(),
   articles: z.array(Article).max(100).optional(),
+  keywords: z.array(Keyword).max(500).optional(),
 });
 
 export const POST: APIRoute = async ({ request }) => {
@@ -42,7 +49,29 @@ export const POST: APIRoute = async ({ request }) => {
     if (!parsed.success) {
       return Response.json({ ok: false, error: "bad body" }, { status: 400 });
     }
-    const { date, ranks = [], articles = [] } = parsed.data;
+    const { date, ranks = [], articles = [], keywords = [] } = parsed.data;
+    let kwCount = 0;
+    if (keywords.length > 0) {
+      for (const k of keywords) {
+        await db
+          .insert(keywordInventory)
+          .values({
+            tenantId,
+            keyword: k.keyword,
+            status: k.status,
+            articleSlug: k.article_slug ?? null,
+            priority: k.priority ?? 50,
+          })
+          .onDuplicateKeyUpdate({
+            set: {
+              status: k.status,
+              articleSlug: k.article_slug ?? null,
+              priority: k.priority ?? 50,
+            },
+          });
+        kwCount++;
+      }
+    }
 
     if (ranks.length > 0) {
       await db
@@ -74,7 +103,7 @@ export const POST: APIRoute = async ({ request }) => {
         });
       }
     }
-    return Response.json({ ok: true, ranks: ranks.length, articles: articles.length });
+    return Response.json({ ok: true, ranks: ranks.length, articles: articles.length, keywords: kwCount });
   } catch (e) {
     console.error("[ingest/snapshots]", e);
     return Response.json({ ok: false, error: "internal" }, { status: 500 });

@@ -34,6 +34,7 @@ const user = Astro.locals.user;
           <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/laporan">Laporan</a>
           <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/iklan">Iklan</a>
           <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/roi">ROI</a>
+          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/keywords">Keyword</a>
           {user?.role === "superadmin" && <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/hq">HQ</a>}
           <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/ai">AI</a>
           {user?.role === "superadmin" && <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/health">Health</a>}

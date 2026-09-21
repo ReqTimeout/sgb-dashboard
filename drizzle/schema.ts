@@ -141,6 +141,20 @@ export const aiCitations = mysqlTable("ai_citations", {
   screenshotPath: varchar("screenshot_path", { length: 512 }),
 });
 
+export const keywordInventory = mysqlTable(
+  "keyword_inventory",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: int("tenant_id").notNull(),
+    keyword: varchar("keyword", { length: 255 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("antre"),
+    articleSlug: varchar("article_slug", { length: 255 }),
+    priority: int("priority").notNull().default(50),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_keyword").on(t.tenantId, t.keyword)],
+);
+
 export const notesInternal = mysqlTable("notes_internal", {
   id: serial("id").primaryKey(),
   tenantId: int("tenant_id").notNull(),
