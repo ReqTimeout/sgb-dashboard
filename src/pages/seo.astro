@@ -1,0 +1,86 @@
+---
+import Base from "../layouts/Base.astro";
+import Chart from "../components/Chart.svelte";
+import { getRequestTenant, latestRanks, series, sumRange } from "../lib/data";
+import { fmtInt, fmtNum, fmtPct } from "../lib/insights";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const clicks = await series(tenant.id, "seo", "clicks", 90);
+const impr = await series(tenant.id, "seo", "impressions", 90);
+const ctr = await series(tenant.id, "seo", "ctr", 90);
+const pos = await series(tenant.id, "seo", "position", 90);
+
+const totClicks = clicks.reduce((a, p) => a + p.value, 0);
+const totImpr = impr.reduce((a, p) => a + p.value, 0);
+const avgCtr = ctr.length ? ctr.reduce((a, p) => a + p.value, 0) / ctr.length : null;
+const avgPos = pos.length ? pos.reduce((a, p) => a + p.value, 0) / pos.length : null;
+
+const option = {
+  tooltip: { trigger: "axis" },
+  legend: { data: ["Klik", "Tayang"], top: 0 },
+  grid: { left: 44, right: 12, top: 36, bottom: 28 },
+  xAxis: { type: "category", data: clicks.map((p) => p.date.slice(5)), axisLabel: { hideOverlap: true } },
+  yAxis: [
+    { type: "value", name: "Klik" },
+    { type: "value", name: "Tayang", splitLine: { show: false } },
+  ],
+  series: [
+    { name: "Klik", type: "line", smooth: true, data: clicks.map((p) => p.value), itemStyle: { color: "#dc2626" }, areaStyle: { opacity: 0.08 } },
+    { name: "Tayang", type: "bar", yAxisIndex: 1, data: impr.map((p) => p.value), itemStyle: { color: "#e2e8f0" } },
+  ],
+};
+
+const ranks = await latestRanks(tenant.id, 50);
+const queries = ranks.filter((r) => !r.keyword.startsWith("page:")).slice(0, 10);
+const pages = ranks.filter((r) => r.keyword.startsWith("page:")).slice(0, 10);
+const snapDate = ranks[0]?.date ?? null;
+---
+<Base title="Performa SEO">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">Performa SEO</h1>
+  <p class="mt-1 text-sm text-slate-500">
+    {tenant.name} · 90 hari terakhir
+    {snapDate ? ` · data s.d. ${snapDate} (GSC delay ~2 hari)` : " · menunggu push GSC pertama"}
+  </p>
+
+  <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-2xl font-semibold">{fmtInt(totClicks)}</div><div class="text-sm font-bold">Klik <span class="font-normal text-slate-400">90 hari</span></div><div class="text-xs text-slate-400">orang masuk dari Google</div></div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-2xl font-semibold">{fmtNum(totImpr)}</div><div class="text-sm font-bold">Tayang <span class="font-normal text-slate-400">90 hari</span></div><div class="text-xs text-slate-400">kali tampil di pencarian</div></div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-2xl font-semibold">{fmtPct(avgCtr)}</div><div class="text-sm font-bold">CTR rata-rata</div><div class="text-xs text-slate-400">klik ÷ tayang</div></div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-2xl font-semibold">{avgPos ? avgPos.toFixed(1).replace(".", ",") : "—"}</div><div class="text-sm font-bold">Posisi rata-rata</div><div class="text-xs text-slate-400">≤10 = halaman 1</div></div>
+  </div>
+
+  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+    <h2 class="font-heading font-bold">Tren harian</h2>
+    {clicks.length > 0 ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-slate-400">Belum ada data — push GSC pertama jalan 05:00 WIB.</p>}
+  </div>
+
+  <div class="mt-4 grid gap-4 lg:grid-cols-2">
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <h2 class="font-heading font-bold">Pencarian teratas <span class="font-body text-xs font-normal text-slate-400">yang membawa klik</span></h2>
+      <table class="mt-2 w-full text-sm">
+        <thead><tr class="text-left text-xs text-slate-400"><th class="py-1">Query</th><th class="text-right">Klik</th><th class="text-right">Posisi</th></tr></thead>
+        <tbody>
+          {queries.length === 0 && <tr><td colspan="3" class="py-4 text-center text-slate-400">—</td></tr>}
+          {queries.map((q) => (
+            <tr class="border-t border-slate-100"><td class="py-1.5 pr-2">{q.keyword}</td><td class="text-right font-mono-num">{fmtInt(q.clicks)}</td><td class="text-right font-mono-num">{q.position ?? "—"}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <h2 class="font-heading font-bold">Halaman teratas <span class="font-body text-xs font-normal text-slate-400">paling banyak diklik</span></h2>
+      <table class="mt-2 w-full text-sm">
+        <thead><tr class="text-left text-xs text-slate-400"><th class="py-1">Halaman</th><th class="text-right">Klik</th><th class="text-right">Posisi</th></tr></thead>
+        <tbody>
+          {pages.length === 0 && <tr><td colspan="3" class="py-4 text-center text-slate-400">—</td></tr>}
+          {pages.map((p) => (
+            <tr class="border-t border-slate-100"><td class="py-1.5 pr-2 break-all text-xs">{(p.pageUrl ?? "").replace("https://sariglassbangunan.com", "") || "/"}</td><td class="text-right font-mono-num">{fmtInt(p.clicks)}</td><td class="text-right font-mono-num">{p.position ?? "—"}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</Base>

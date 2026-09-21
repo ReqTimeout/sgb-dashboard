@@ -12,6 +12,7 @@ const Body = z.object({
   metrics: z
     .array(
       z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         channel: z.string().max(32),
         metric: z.string().max(64),
         value: z.number().nullable().optional(),
@@ -43,7 +44,7 @@ export const POST: APIRoute = async ({ request }) => {
         .insert(dailyMetrics)
         .values({
           tenantId,
-          date,
+          date: m.date ?? date,
           channel: m.channel,
           metric: m.metric,
           valueNum: m.value ?? null,

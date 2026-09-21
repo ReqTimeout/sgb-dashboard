@@ -25,6 +25,14 @@ const user = Astro.locals.user;
           <span class="text-brand-600">SGB</span> Dashboard
           <span class="ml-2 rounded bg-slate-100 px-2 py-0.5 font-mono-num text-[11px] font-medium text-slate-500">P0 skeleton</span>
         </a>
+        <nav class="hidden items-center gap-1 text-sm md:flex">
+          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/">Pagi ini</a>
+          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/seo">SEO</a>
+          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/ranking">Ranking</a>
+          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/konten">Konten</a>
+          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/ai">AI</a>
+          {user?.role === "superadmin" && <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/health">Health</a>}
+        </nav>
         <nav class="flex items-center gap-3 text-sm">
           {user ? (
             <>

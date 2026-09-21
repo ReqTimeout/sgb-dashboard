@@ -1,0 +1,47 @@
+---
+import Base from "../layouts/Base.astro";
+import { getRequestTenant, latestMetric } from "../lib/data";
+import { fmtInt } from "../lib/insights";
+
+const user = Astro.locals.user!;
+if (user.role !== "superadmin") throw new Error("Khusus agency");
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, true);
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const okRuns = await latestMetric(tenant.id, "system", "cron_ok_24h");
+const errRuns = await latestMetric(tenant.id, "system", "cron_err_24h");
+const pending = await latestMetric(tenant.id, "seo", "indexing_pending");
+const healthy = (errRuns?.value ?? 0) === 0;
+
+const crons = ["publish-articles", "seo-publish-pipeline", "sitemap-ping", "daily-report (P4)", "gsc-indexing", "indexnow", "gsc-url-inspection", "llm-search-ping", "health-check", "weekly-report", "push-metrics (P2)"];
+---
+<Base title="System Health">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">System Health <span class="font-body text-sm font-normal text-slate-400">agency only</span></h1>
+  <p class="mt-1 text-sm text-slate-500">{tenant.name} · ringkasan 24 jam terakhir (dari push-metrics 05:00 WIB)</p>
+
+  <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <div class={`font-mono-num text-3xl font-semibold ${healthy ? "text-emerald-600" : "text-red-600"}`}>{healthy ? "SEHAT" : "CEK"}</div>
+      <div class="mt-1 font-heading text-sm font-bold">Status mesin</div>
+      <div class="text-xs text-slate-400">{fmtInt(okRuns?.value)} run OK · {fmtInt(errRuns?.value)} error /24 jam</div>
+    </div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <div class="font-mono-num text-3xl font-semibold">{pending ? fmtInt(pending.value) : "—"}</div>
+      <div class="mt-1 font-heading text-sm font-bold">Antre index</div>
+      <div class="text-xs text-slate-400">URL menunggu Google</div>
+    </div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <div class="font-mono-num text-3xl font-semibold">{crons.length}</div>
+      <div class="mt-1 font-heading text-sm font-bold">Cron terdaftar</div>
+      <div class="text-xs text-slate-400">9 existing + 2 baru</div>
+    </div>
+  </div>
+
+  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+    <h2 class="font-heading font-bold">Daftar cron</h2>
+    <ul class="mt-2 grid gap-1 text-sm sm:grid-cols-2">
+      {crons.map((c) => (<li class="rounded-lg bg-slate-50 px-3 py-1.5 font-mono-num text-xs">{c}</li>))}
+    </ul>
+    <p class="mt-2 text-xs text-slate-400">Detail per-run ada di admin Sari Glass (cron_runs). Halaman ini ringkasan push harian.</p>
+  </div>
+</Base>

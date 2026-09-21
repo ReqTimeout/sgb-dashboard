@@ -1,0 +1,58 @@
+---
+import Base from "../layouts/Base.astro";
+import { getRequestTenant, latestRanks, rankHistory } from "../lib/data";
+import { fmtInt, insightPosition } from "../lib/insights";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const ranks = (await latestRanks(tenant.id, 50)).filter((r) => !r.keyword.startsWith("page:")).slice(0, 15);
+// Movers: bandingkan posisi terbaru vs 7 hari lalu (untuk 15 keyword tampil)
+const movers: { keyword: string; now: number | null; prev: number | null; move: number | null; clicks: number | null }[] = [];
+for (const r of ranks) {
+  const hist = await rankHistory(tenant.id, r.keyword, 10);
+  const prev = hist.length > 1 ? hist[0].value : null;
+  movers.push({
+    keyword: r.keyword,
+    now: r.position,
+    prev,
+    move: r.position != null && prev != null ? prev - r.position : null,
+    clicks: r.clicks,
+  });
+}
+movers.sort((a, b) => (b.move ?? -999) - (a.move ?? -999));
+const avg = ranks.length ? ranks.reduce((a, r) => a + (r.position ?? 0), 0) / ranks.filter((r) => r.position != null).length : null;
+
+function badge(pos: number | null): string {
+  if (pos == null) return `<span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">—</span>`;
+  if (pos <= 3) return `<span class="rounded-full bg-safety-400 px-2 py-0.5 text-xs font-bold text-slate-900">🎯 TOP ${pos}</span>`;
+  if (pos <= 10) return `<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700">Hal. 1 · ${pos}</span>`;
+  return `<span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">Hal. 2+ · ${pos}</span>`;
+}
+---
+<Base title="Ranking Tracker">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">Ranking Tracker</h1>
+  <p class="mt-1 text-sm text-slate-500">{tenant.name} · {insightPosition(avg)}</p>
+
+  <div class="mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+    <table class="w-full min-w-[560px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-400"><th class="px-4 py-2">Keyword</th><th class="px-2 py-2 text-right">Posisi</th><th class="px-2 py-2 text-right">Gerak 7 hari</th><th class="px-2 py-2 text-right">Klik</th><th class="px-4 py-2">Status</th></tr></thead>
+      <tbody>
+        {movers.length === 0 && <tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">Belum ada data — push GSC pertama jalan 05:00 WIB.</td></tr>}
+        {movers.map((m) => (
+          <tr class="border-t border-slate-100">
+            <td class="px-4 py-2.5 font-medium">{m.keyword}</td>
+            <td class="px-2 py-2 text-right font-mono-num text-lg font-semibold">{m.now ?? "—"}</td>
+            <td class="px-2 py-2 text-right font-mono-num">
+              {m.move == null ? <span class="text-slate-300">—</span> : m.move > 0 ? <span class="font-bold text-emerald-600">▲ {m.move}</span> : m.move < 0 ? <span class="font-bold text-red-600">▼ {Math.abs(m.move)}</span> : <span class="text-slate-400">▬ 0</span>}
+            </td>
+            <td class="px-2 py-2 text-right font-mono-num">{fmtInt(m.clicks)}</td>
+            <td class="px-4 py-2"><Fragment set:html={badge(m.now)} /></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-2 text-xs text-slate-400">💡 Cara baca: angka gerak hijau ▲ = naik peringkat (bagus). Coba Google sendiri keyword TOP 3 untuk buktikan.</p>
+</Base>

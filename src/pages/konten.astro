@@ -1,0 +1,50 @@
+---
+import Base from "../layouts/Base.astro";
+import { getRequestTenant, latestMetric, recentArticles } from "../lib/data";
+import { fmtInt } from "../lib/insights";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const pubTotal = await latestMetric(tenant.id, "content", "articles_published_total");
+const draftTotal = await latestMetric(tenant.id, "content", "articles_draft_total");
+const pub24 = await latestMetric(tenant.id, "content", "articles_published_24h");
+const pending = await latestMetric(tenant.id, "seo", "indexing_pending");
+const list = await recentArticles(tenant.id, 20);
+
+const steps = [
+  { label: "Draft siap", value: draftTotal?.value, note: "menunggu jadwal terbit" },
+  { label: "Terbit 24 jam", value: pub24?.value, note: "artikel baru kemarin" },
+  { label: "Total terbit", value: pubTotal?.value, note: "sejak mesin jalan" },
+  { label: "Antre index", value: pending?.value, note: "URL menunggu Google" },
+];
+---
+<Base title="Content Pipeline">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">Content Pipeline</h1>
+  <p class="mt-1 text-sm text-slate-500">{tenant.name} · mesin konten bekerja transparan — tanpa perlu tanya.</p>
+
+  <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    {steps.map((s, i) => (
+      <div class="relative rounded-2xl border border-slate-200 bg-white p-4">
+        {i < steps.length - 1 && <div class="absolute -right-2.5 top-1/2 hidden h-0 w-0 -translate-y-1/2 border-y-8 border-l-8 border-y-transparent border-l-brand-600 sm:block" />}
+        <div class="font-mono-num text-3xl font-semibold">{s.value != null ? fmtInt(s.value) : "—"}</div>
+        <div class="mt-1 font-heading text-sm font-bold">{s.label}</div>
+        <div class="text-xs text-slate-400">{s.note}</div>
+      </div>
+    ))}
+  </div>
+
+  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+    <h2 class="font-heading font-bold">Artikel terbaru <span class="font-body text-xs font-normal text-slate-400">snapshot push harian</span></h2>
+    <table class="mt-2 w-full text-sm">
+      <thead><tr class="text-left text-xs text-slate-400"><th class="py-1">Judul</th><th class="py-1 text-right">Status</th></tr></thead>
+      <tbody>
+        {list.length === 0 && <tr><td colspan="2" class="py-4 text-center text-slate-400">Belum ada snapshot — push pertama 05:00 WIB.</td></tr>}
+        {list.map((a) => (
+          <tr class="border-t border-slate-100"><td class="py-1.5 pr-2">{a.title}</td><td class="py-1.5 text-right"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700">{a.status}</span></td></tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</Base>

@@ -1,0 +1,44 @@
+---
+import Base from "../layouts/Base.astro";
+import { getRequestTenant, latestMetric } from "../lib/data";
+import { fmtInt } from "../lib/insights";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+// Referral AI dari GA4 (channel 'ai', terisi setelah GTM live P6 + collector)
+const aiRefs = await latestMetric(tenant.id, "ai", "referrals_7d");
+---
+<Base title="AI Visibility">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">AI Visibility</h1>
+  <p class="mt-1 text-sm text-slate-500">{tenant.name} · toko juga ditemukan lewat ChatGPT, Perplexity & AI search lain.</p>
+
+  <div class="mt-6 grid gap-3 sm:grid-cols-2">
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <div class="font-heading text-sm font-bold">📄 llms.txt</div>
+      <div class="mt-1 font-mono-num text-2xl font-semibold text-emerald-600">✅ Live</div>
+      <p class="mt-1 text-xs text-slate-400">24KB komprehensif (produk, brand, area, artikel, FAQ). Dicek otomatis tiap 12 jam oleh cron llm-search-ping di admin.</p>
+    </div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <div class="font-heading text-sm font-bold">🤖 Izin crawler AI</div>
+      <div class="mt-1 font-mono-num text-2xl font-semibold">13/13</div>
+      <p class="mt-1 text-xs text-slate-400">GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, dll diizinkan robots.txt.</p>
+    </div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <div class="font-heading text-sm font-bold">🔍 IndexNow → Bing</div>
+      <div class="mt-1 font-mono-num text-2xl font-semibold">Aktif</div>
+      <p class="mt-1 text-xs text-slate-400">Submit tiap 2 jam + Bing Webmaster API. ChatGPT Search memakai index Bing — artinya konten baru cepat masuk AI search.</p>
+    </div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <div class="font-heading text-sm font-bold">👥 Kunjungan dari AI <span class="font-body font-normal text-slate-400">/7 hari</span></div>
+      <div class="mt-1 font-mono-num text-2xl font-semibold">{aiRefs ? fmtInt(aiRefs.value) : "—"}</div>
+      <p class="mt-1 text-xs text-slate-400">{aiRefs ? "dari chatgpt.com, perplexity.ai, claude.ai, copilot, gemini (via GA4)" : "mulai terhitung setelah GTM live (P6) + collector GA4"}</p>
+    </div>
+  </div>
+
+  <div class="mt-4 rounded-2xl border-2 border-dashed border-slate-200 bg-white p-6 text-sm text-slate-500">
+    <strong class="font-heading text-slate-700">Cek sitasi bulanan</strong>
+    <p class="mt-1">Agent menanyakan Perplexity/ChatGPT/Gemini: "toko bahan bangunan majenang" lalu mencatat apakah <strong>{tenant.name}</strong> disebut — tren sitasi tampil di sini. Jadwal cek berikutnya: awal bulan depan.</p>
+  </div>
+</Base>
