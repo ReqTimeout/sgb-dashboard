@@ -1,0 +1,99 @@
+---
+import Base from "../layouts/Base.astro";
+import Chart from "../components/Chart.svelte";
+import { getRequestTenant } from "../lib/data";
+import { fmtInt } from "../lib/insights";
+import { and, eq, gte, sql } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { leadEvents } from "../../drizzle/schema";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+const db = getDb();
+const since = new Date();
+since.setUTCDate(since.getUTCDate() - 30);
+const sinceStr = since.toISOString();
+
+// Lead per hari
+const perDay = await db
+  .select({ d: sql<string>`DATE(${leadEvents.ts})`, n: sql<number>`COUNT(*)` })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, new Date(sinceStr))))
+  .groupBy(sql`DATE(${leadEvents.ts})`)
+  .orderBy(sql`DATE(${leadEvents.ts})`);
+const total = perDay.reduce((a, r) => a + Number(r.n), 0);
+
+// Halaman sumber
+const byPage = await db
+  .select({ page: leadEvents.pageUrl, n: sql<number>`COUNT(*)` })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, new Date(sinceStr))))
+  .groupBy(leadEvents.pageUrl)
+  .orderBy(sql`COUNT(*) DESC`)
+  .limit(10);
+
+// Jam sibuk (0-23)
+const byHour = await db
+  .select({ h: sql<number>`HOUR(${leadEvents.ts})`, n: sql<number>`COUNT(*)` })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, new Date(sinceStr))))
+  .groupBy(sql`HOUR(${leadEvents.ts})`)
+  .orderBy(sql`HOUR(${leadEvents.ts})`);
+const hours = Array.from({ length: 24 }, (_, h) => Number(byHour.find((r) => Number(r.h) === h)?.n ?? 0));
+const peakHour = hours.indexOf(Math.max(...hours, 0));
+
+const option = {
+  tooltip: { trigger: "axis" },
+  grid: { left: 36, right: 12, top: 24, bottom: 28 },
+  xAxis: { type: "category", data: perDay.map((r) => String(r.d).slice(5)), axisLabel: { hideOverlap: true } },
+  yAxis: { type: "value" },
+  series: [{ name: "Lead WA", type: "bar", data: perDay.map((r) => Number(r.n)), itemStyle: { color: "#25d366" } }],
+};
+const hourOpt = {
+  tooltip: { trigger: "axis" },
+  grid: { left: 36, right: 12, top: 24, bottom: 28 },
+  xAxis: { type: "category", data: hours.map((_, h) => `${h}:00`) },
+  yAxis: { type: "value" },
+  series: [{ name: "Lead", type: "line", smooth: true, data: hours, itemStyle: { color: "#dc2626" }, areaStyle: { opacity: 0.08 } }],
+};
+const shortPage = (u: string | null) => (u ?? "(langsung)").replace("https://sariglassbangunan.com", "") || "/";
+---
+<Base title="WA Leads">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">WA Leads ⭐</h1>
+  <p class="mt-1 text-sm text-slate-500">
+    {tenant.name} ·
+    {total > 0
+      ? `${fmtInt(total)} calon pembeli klik WhatsApp 30 hari terakhir${total > 0 ? ` — jam tersibuk ${peakHour}.00` : ""}.`
+      : "Belum ada lead 30 hari terakhir — data mulai mengalir dari gateway CAPI."}
+  </p>
+
+  <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-3xl font-semibold">{fmtInt(total)}</div><div class="mt-1 font-heading text-sm font-bold">Lead 30 hari</div><div class="text-xs text-slate-400">klik WhatsApp dari web</div></div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-3xl font-semibold">{total > 0 ? `${peakHour}.00` : "—"}</div><div class="mt-1 font-heading text-sm font-bold">Jam tersibuk</div><div class="text-xs text-slate-400">waktu terbaik posting/promo</div></div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-3xl font-semibold">{byPage.length > 0 ? fmtInt(Number(byPage[0].n)) : "—"}</div><div class="mt-1 font-heading text-sm font-bold">Lead top halaman</div><div class="text-xs text-slate-400">{byPage.length > 0 ? shortPage(byPage[0].page) : "—"}</div></div>
+  </div>
+
+  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+    <h2 class="font-heading font-bold">Lead per hari</h2>
+    {perDay.length > 0 ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-slate-400">Belum ada data.</p>}
+  </div>
+
+  <div class="mt-4 grid gap-4 lg:grid-cols-2">
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <h2 class="font-heading font-bold">Halaman sumber lead <span class="font-body text-xs font-normal text-slate-400">produk peminat tinggi</span></h2>
+      <table class="mt-2 w-full text-sm">
+        <tbody>
+          {byPage.length === 0 && <tr><td class="py-4 text-center text-slate-400">—</td></tr>}
+          {byPage.map((r) => (
+            <tr class="border-t border-slate-100"><td class="py-1.5 pr-2 break-all text-xs">{shortPage(r.page)}</td><td class="py-1.5 text-right font-mono-num font-bold">{fmtInt(Number(r.n))}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+      <h2 class="font-heading font-bold">Jam sibuk</h2>
+      {total > 0 ? <Chart option={hourOpt} height={220} client:load /> : <p class="py-8 text-center text-sm text-slate-400">Belum ada data.</p>}
+    </div>
+  </div>
+</Base>
