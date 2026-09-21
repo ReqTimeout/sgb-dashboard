@@ -1,0 +1,44 @@
+---
+import Base from "../layouts/Base.astro";
+import { getRequestTenant, series, sumRange } from "../lib/data";
+import { fmtInt } from "../lib/insights";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const mSpend = sumRange(await series(tenant.id, "meta_ads", "spend", 30), 30, 0);
+const gSpend = sumRange(await series(tenant.id, "google_ads", "spend", 30), 30, 0);
+const mLeads = Math.round(sumRange(await series(tenant.id, "meta_ads", "leads", 30), 30, 0));
+const gConv = Math.round(sumRange(await series(tenant.id, "google_ads", "conversions", 30), 30, 0));
+const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0));
+const waLeads: number = 0; // TODO P4b-C5: agregat lead_events sudah ada di /leads
+
+const totalSpend = mSpend + gSpend;
+const totalLeads = mLeads + gConv + waLeads;
+const story = totalSpend === 0 && totalLeads === 0 && orgClicks === 0
+  ? "Belum ada data — mesin pengumpul sudah jalan, angka terisi otomatis."
+  : totalSpend === 0
+    ? `Bulan ini Rp0 iklan → traffic murni organik (${fmtInt(orgClicks)} klik Google). Saat P9 jalan, baris ini jadi cerita ROI utuh.`
+    : `Bulan ini: Rp${fmtInt(totalSpend)} iklan → ${fmtInt(totalLeads)} lead/konversi + ${fmtInt(orgClicks)} klik organik gratis.`;
+---
+<Base title="ROI Lintas Channel">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">Cross-channel ROI ⭐</h1>
+  <p class="mt-1 text-sm text-slate-500">{tenant.name} · jawaban "duit saya jadi apa?"</p>
+
+  <div class="mt-6 rounded-2xl bg-[#1C1917] p-6 text-white">
+    <div class="text-xs tracking-widest text-[#FACC15]">RINGKASAN 30 HARI</div>
+    <p class="mt-2 font-heading text-xl font-bold leading-snug">{story}</p>
+    <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="rounded-xl bg-white/10 p-3"><div class="font-mono-num text-xl font-bold">Rp{fmtInt(totalSpend)}</div><div class="text-xs opacity-70">Total iklan</div></div>
+      <div class="rounded-xl bg-white/10 p-3"><div class="font-mono-num text-xl font-bold">{fmtInt(totalLeads)}</div><div class="text-xs opacity-70">Lead/konversi iklan</div></div>
+      <div class="rounded-xl bg-white/10 p-3"><div class="font-mono-num text-xl font-bold">{fmtInt(orgClicks)}</div><div class="text-xs opacity-70">Klik organik gratis</div></div>
+      <div class="rounded-xl bg-white/10 p-3"><div class="font-mono-num text-xl font-bold">{totalLeads ? "Rp" + fmtInt(totalSpend / totalLeads) : "—"}</div><div class="text-xs opacity-70">Biaya per lead</div></div>
+    </div>
+  </div>
+
+  <div class="mt-4 grid gap-3 sm:grid-cols-2">
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-heading text-sm font-bold">Meta Ads</div><div class="mt-1 text-sm">Rp{fmtInt(mSpend)} → {fmtInt(mLeads)} lead</div></div>
+    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-heading text-sm font-bold">Google Ads</div><div class="mt-1 text-sm">Rp{fmtInt(gSpend)} → {fmtInt(gConv)} konversi</div></div>
+  </div>
+</Base>
