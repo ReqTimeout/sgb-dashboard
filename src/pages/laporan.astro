@@ -1,0 +1,49 @@
+---
+import Base from "../layouts/Base.astro";
+import { getRequestTenant } from "../lib/data";
+import { desc, eq } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { dailyReports } from "../../drizzle/schema";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const db = getDb();
+const rows = await db
+  .select()
+  .from(dailyReports)
+  .where(eq(dailyReports.tenantId, tenant.id))
+  .orderBy(desc(dailyReports.reportDate))
+  .limit(30);
+
+function num(p: unknown, k: string): string {
+  const v = (p as Record<string, unknown> | null)?.[k];
+  return typeof v === "number" ? new Intl.NumberFormat("id-ID").format(Math.round(v)) : "—";
+}
+---
+<Base title="Arsip Laporan">
+  <h1 class="font-heading text-2xl font-bold tracking-tight">Arsip Laporan</h1>
+  <p class="mt-1 text-sm text-slate-500">{tenant.name} · semua email harian 06:45 tersimpan di sini — tidak perlu cari-cari inbox.</p>
+
+  <div class="mt-6 grid gap-3">
+    {rows.length === 0 && <p class="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">Belum ada laporan — push pertama dari cron daily-report 06:45.</p>}
+    {rows.map((r) => {
+      const p = r.payloadJson as Record<string, unknown> | null;
+      return (
+        <div class="rounded-2xl border border-slate-200 bg-white p-4">
+          <div class="flex items-center justify-between">
+            <strong class="font-heading">{r.reportDate} <span class="ml-1 rounded bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">{r.period}</span></strong>
+            <span class="text-xs text-slate-400">{r.emailSentAt ? "📧 terkirim" : "arsip saja"}</span>
+          </div>
+          <div class="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+            <div><span class="font-mono-num font-bold">{num(p, "clicks_y")}</span> <span class="text-slate-400">klik</span></div>
+            <div><span class="font-mono-num font-bold">{num(p, "articles_new")}</span> <span class="text-slate-400">artikel baru</span></div>
+            <div><span class="font-mono-num font-bold">{num(p, "submitted")}</span> <span class="text-slate-400">URL submit</span></div>
+            <div><span class="font-mono-num font-bold">{num(p, "cron_err")}</span> <span class="text-slate-400">cron error</span></div>
+          </div>
+        </div>
+      );
+    })}
+  </div>
+</Base>
