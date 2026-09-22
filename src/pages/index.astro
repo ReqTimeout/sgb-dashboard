@@ -1,6 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
+import AreaChartLC from "../components/AreaChartLC.svelte";
+import CopilotWidget from "../components/CopilotWidget.svelte";
 import { getRequestTenant, latestMetric, series, sumRange } from "../lib/data";
 import { delta, fmtInt, fmtNum, fmtRp, greet } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
@@ -85,12 +87,17 @@ const headline = hasData
     <StatCard label="Lead WA /14 hari" value={leads ? fmtInt(leads.value) : "—"} hint="klik WhatsApp dari web" spark={sparkLeads} />
   </div>
 
+  <!-- AI COPILOT WIDGET (live data → 3 aksi spesifik) -->
+  <div class="card mt-4 p-5">
+    <CopilotWidget client:load />
+  </div>
+
   <!-- INSIGHT NARATIF (3 kalimat human) -->
   <div class="card mt-4 p-5">
     <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Insight minggu ini</div>
     <div class="mt-2 grid gap-3 sm:grid-cols-3 text-sm leading-relaxed">
       <p class="rounded-lg bg-[color:var(--bg-surface-2)]/60 p-3">
-        <strong class="text-[color:var(--text-primary)]">SEO mesin Anda jalan.</strong>{" "}
+        <strong class="text-[color:var(--text-primary)]">Sampeyan, SEO Anda jalan.</strong>{" "}
         <span class="text-[color:var(--text-secondary)]">
           {sum30 > 0
             ? `${fmtInt(sum30)} klik masuk dari Google 30 hari terakhir. Kalau pakai iklan, ini setara sekitar ${fmtRp(sum30 * 1500)} budget.`
@@ -113,6 +120,33 @@ const headline = hasData
             : "Belum ada lead WA — halaman ini terisi otomatis dari klik tombol WhatsApp di situs."}
         </span>
       </p>
+    </div>
+  </div>
+
+  <!-- CHART TREN 30 HARI (LayerChart) -->
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <div>
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Tren 30 hari</h2>
+        <p class="text-[10px] text-[color:var(--text-faint)]">Klik merah = masuk dari Google · Klik hijau = lead WA dari situs</p>
+      </div>
+      <span class="chip text-[10px]">{clicks.length} hari</span>
+    </div>
+    <div class="p-4">
+      {clicks.length > 0 ? (
+        <div class="grid gap-3 lg:grid-cols-2">
+          <div>
+            <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Klik Google</div>
+            <AreaChartLC data={clicks.slice(-30)} height={160} />
+          </div>
+          <div>
+            <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Lead WhatsApp</div>
+            <AreaChartLC data={sparkLeads.map((v, i) => ({ date: sparkLeads.length > 0 ? `d${i}` : `d${i}`, value: v }))} height={160} />
+          </div>
+        </div>
+      ) : (
+        <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — push GSC pertama jalan 05:00 WIB.</p>
+      )}
     </div>
   </div>
 
