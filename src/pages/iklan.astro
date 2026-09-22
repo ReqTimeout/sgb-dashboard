@@ -161,11 +161,11 @@ try {
       <div class="mt-3 grid gap-4 lg:grid-cols-2">
         <div>
           <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Spend harian (Rp)</div>
-          <BarChartLC data={spend.slice(-30).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={200} defaultColor="#0081fb"  client:visible />
+          <BarChartLC data={spend.slice(-30).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={200}  client:visible />
         </div>
         <div>
           <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Chat WA masuk /hari</div>
-          <LineChartLC data={chatStarted.slice(-30)} height={200} color="#25D366"  client:visible />
+          <LineChartLC data={chatStarted.slice(-30)} height={200}  client:visible />
         </div>
       </div>
     ) : (
