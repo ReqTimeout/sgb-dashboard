@@ -22,7 +22,7 @@
     y="value"
     yDomain={[0, null]}
     yNice
-    padding={{ left: 36, right: 8, top: 12, bottom: 24 }}
+    padding={{ left: 44, right: 16, top: 14, bottom: 28 }}
     tooltip={{ mode: "bisect-x" }}
   >
     <Svg>

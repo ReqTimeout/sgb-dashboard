@@ -23,11 +23,11 @@
     y="value"
     yDomain={[0, null]}
     yNice
-    padding={{ left: 36, right: 8, top: 12, bottom: 24 }}
+    padding={{ left: 44, right: 16, top: 14, bottom: 28 }}
     tooltip={{ mode: "bisect-x" }}
   >
     <Svg>
-      <Axis placement="left" grid rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]" />
+      <Axis placement="left" grid rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-subtle)]" />
       <Axis
         placement="bottom"
         rule
@@ -40,7 +40,7 @@
       />
       <Area
         line={{ style: `stroke: ${color}; stroke-width: 2` }}
-        style={`fill: ${color}; fill-opacity: 0.08`}
+        style={`fill: ${color}; fill-opacity: 0.12`}
       />
       <Highlight points lines />
     </Svg>

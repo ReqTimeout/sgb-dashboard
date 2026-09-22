@@ -20,22 +20,23 @@
     y="value"
     yDomain={[0, null]}
     yNice
-    padding={{ left: 36, right: 8, top: 12, bottom: 28 }}
+    cPadding={{ left: 4, right: 4 }}
+    padding={{ left: 44, right: 16, top: 12, bottom: 32 }}
     tooltip={{ mode: "band" }}
   >
     <Svg>
-      <Axis placement="left" grid rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]" />
+      <Axis placement="left" grid rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-subtle)]" />
       <Axis
         placement="bottom"
         rule
         class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]"
         ticks={(scale) => {
           const dom = scale.domain();
-          const step = Math.max(1, Math.ceil(dom.length / 8));
+          const step = Math.max(1, Math.ceil(dom.length / 6));
           return dom.filter((_, i) => i % step === 0);
         }}
       />
-      <Bars radius={3} class={barClass} />
+      <Bars radius={3} class={barClass} inset={2} />
       <Highlight area />
     </Svg>
     <Tooltip.Root>
