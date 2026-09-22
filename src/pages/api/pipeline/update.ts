@@ -64,7 +64,12 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
     if (!rows[0]) return new Response("Lead tidak ditemukan", { status: 404 });
     const was = rows[0];
     const newStatus = parsed.data.status;
-    const dealValue = parsed.data.deal_value ?? (newStatus === "deal" ? was.dealValue : null);
+    // OTOMATIS: deal tanpa nilai → isi estimasi dari skor halaman (tanpa input manual)
+    let dealValue = parsed.data.deal_value ?? (newStatus === "deal" ? was.dealValue : null);
+    if (newStatus === "deal" && !dealValue) {
+      const { scoreLead } = await import("../../../lib/ai/lead-score");
+      dealValue = scoreLead({ pageUrl: was.pageUrl, source: was.source, ts: was.ts, status: was.status }).estValue;
+    }
     await db
       .update(leadEvents)
       .set({

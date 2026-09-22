@@ -1,9 +1,10 @@
 ---
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
-import LineChartLC from "../components/LineChartLC.svelte";
 import BarChartLC from "../components/BarChartLC.svelte";
-import { getRequestTenant } from "../lib/data";
+import LineChartLC from "../components/LineChartLC.svelte";
+import EmptyState from "../components/EmptyState.astro";
+import { getRequestTenant, series, sumRange } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { scoreLead, fmtRpShort } from "../lib/ai/lead-score";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
@@ -22,10 +23,82 @@ const rows = await db
   .from(leadEvents)
   .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, since)))
   .orderBy(desc(leadEvents.ts))
-  .limit(100);
+  .limit(200);
 const total = rows.length;
 
-// Lead per hari
+// Kanalisasi sumber → channel (otomatis, tanpa input)
+function toChannel(raw: string | null): string {
+  const s = (raw ?? "").toLowerCase();
+  if (/meta|facebook|instagram|fb_|ig_/.test(s)) return "Meta Ads";
+  if (/google|gclid|cpc|ads/.test(s)) return "Google Ads";
+  if (/promo/.test(s)) return "Promo";
+  if (/organik|organic|search|seo/.test(s)) return "Organik";
+  if (/referral/.test(s)) return "Referral";
+  return "Langsung";
+}
+const scored = rows.map((r) => ({
+  ...r,
+  channel: toChannel(r.source),
+  sc: scoreLead({ pageUrl: r.pageUrl, source: r.source, ts: r.ts, status: r.status }),
+}));
+const queue = [...scored]
+  .filter((r) => (r.status ?? "baru") !== "batal")
+  .sort((a, b) => b.sc.score - a.sc.score)
+  .slice(0, 20);
+
+// Sisi iklan (otomatis dari producer)
+const mSpend = sumRange(await series(tenant.id, "meta_ads", "spend", 30), 30, 0);
+const mChats = Math.round(sumRange(await series(tenant.id, "meta_ads", "leads", 30), 30, 0));
+const mReplied = Math.round(sumRange(await series(tenant.id, "meta_ads", "chat_replied", 30), 30, 0));
+const gSpend = sumRange(await series(tenant.id, "google_ads", "spend", 30), 30, 0);
+const gConv = Math.round(sumRange(await series(tenant.id, "google_ads", "conversions", 30), 30, 0));
+const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0));
+
+// Statistik per channel (100% otomatis)
+interface ChStat { name: string; href: string; leads: number; est: number; hot: number; stale: number; extra: string; verdict: string; verdictCls: string; }
+const staleCut = Date.now() - 12 * 3600 * 1000;
+function chStat(name: string, href: string, extra: string, verdict: string, verdictCls: string): ChStat {
+  const list = scored.filter((r) => r.channel === name);
+  return {
+    name, href,
+    leads: list.length,
+    est: list.filter((r) => (r.status ?? "baru") !== "deal").reduce((a, r) => a + r.sc.estValue, 0),
+    hot: list.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length,
+    stale: list.filter((r) => (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < staleCut).length,
+    extra, verdict, verdictCls,
+  };
+}
+const mCpa = mChats > 0 ? mSpend / mChats : 0;
+const channels: ChStat[] = [
+  chStat("Meta Ads", "/iklan", mSpend > 0 ? `${fmtRp(mCpa)}/chat · ${fmtRp(mSpend)} spend` : "belum ada spend",
+    mChats === 0 ? "Belum jalan" : mCpa <= 15000 ? "Bagus" : mCpa <= 30000 ? "Pantau" : "Mahal",
+    mChats === 0 ? "chip" : mCpa <= 15000 ? "chip chip-success" : mCpa <= 30000 ? "chip chip-warning" : "chip chip-danger"),
+  chStat("Google Ads", "/iklan", gSpend > 0 ? `${fmtRp(gSpend)} spend · ${gConv} konversi` : "belum jalan (P9)",
+    gSpend > 0 ? "Berjalan" : "Siap (impor GA4 aktif)", gSpend > 0 ? "chip chip-success" : "chip"),
+  chStat("Organik", "/seo", `${fmtInt(orgClicks)} klik gratis/30h`,
+    orgClicks > 0 ? "Bagus" : "Menunggu", orgClicks > 0 ? "chip chip-success" : "chip"),
+  chStat("Promo", "/iklan", "halaman /promo/*", "—", "chip"),
+  chStat("Langsung", "/leads", "tanpa perantara", "—", "chip"),
+  chStat("Referral", "/leads", "dari situs lain", "—", "chip"),
+].filter((c) => c.leads > 0 || ["Meta Ads", "Google Ads", "Organik"].includes(c.name));
+
+const potTotal = scored.filter((r) => (r.status ?? "baru") !== "deal" && (r.status ?? "baru") !== "batal")
+  .reduce((a, r) => a + r.sc.estValue, 0);
+const best = [...channels].filter((c) => c.leads > 0).sort((a, b) => b.est - a.est)[0];
+const hotN = scored.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length;
+
+// Revenue per channel (dari deal)
+const revByCh = new Map<string, number>();
+let revTotal = 0;
+for (const r of rows) {
+  if (r.status === "deal" && r.dealValue) {
+    const ch = toChannel(r.source);
+    revByCh.set(ch, (revByCh.get(ch) ?? 0) + r.dealValue);
+    revTotal += r.dealValue;
+  }
+}
+
+// Charts
 const dayMap = new Map<string, number>();
 for (const r of rows) dayMap.set(String(r.ts).slice(0, 10), (dayMap.get(String(r.ts).slice(0, 10)) ?? 0) + 1);
 const days: string[] = [];
@@ -34,150 +107,127 @@ for (let i = 29; i >= 0; i--) {
   dt.setUTCDate(dt.getUTCDate() - i);
   days.push(dt.toISOString().slice(0, 10));
 }
-
-// Jam sibuk
 const hours = Array.from({ length: 24 }, () => 0);
 for (const r of rows) hours[new Date(r.ts).getUTCHours()]++;
 const peakHour = hours.indexOf(Math.max(...hours, 0));
 
-// Kanban
-const cols = [
-  { key: "baru", label: "BARU", cls: "chip-info" },
-  { key: "dibalas", label: "DIBALAS", cls: "chip-warning" },
-  { key: "deal", label: "DEAL", cls: "chip-success" },
-  { key: "batal", label: "BATAL", cls: "chip" },
-] as const;
-const byStatus = (s: string) => rows.filter((r) => (r.status ?? "baru") === s);
-// OTOMATIS: tiap lead dapat skor + estimasi nilai → sort prioritas tertinggi dulu
-const scored = rows.map((r) => ({
-  ...r,
-  sc: scoreLead({ pageUrl: r.pageUrl, source: r.source, ts: r.ts, status: r.status }),
-}));
-const byStatusScored = (s: string) =>
-  scored.filter((r) => (r.status ?? "baru") === s).sort((a, b) => b.sc.score - a.sc.score);
-const staleMs = Date.now() - 24 * 3600 * 1000;
-const urgentMs = Date.now() - 12 * 3600 * 1000;
-const stale = byStatus("baru").filter((r) => new Date(r.ts).getTime() < staleMs);
-// OTOMATIS: lead BARU >12 jam = MENDESAK + total potensi Rp yang terancam hilang
-const urgent = scored.filter((r) => (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < urgentMs);
-const urgentValue = urgent.reduce((a, r) => a + r.sc.estValue, 0);
-const tierChip = (t: string) =>
-  t === "HOT" ? "chip chip-danger" : t === "WARM" ? "chip chip-warning" : "chip";
-
-// Revenue per sumber
-const revBySource = new Map<string, number>();
-let revTotal = 0;
-for (const r of rows) {
-  if (r.status === "deal" && r.dealValue) {
-    const s = r.source ?? "langsung";
-    revBySource.set(s, (revBySource.get(s) ?? 0) + r.dealValue);
-    revTotal += r.dealValue;
-  }
-}
 const shortPage = (u: string | null) => (u ?? "(langsung)").replace("https://sariglassbangunan.com", "") || "/";
-const fmtDate = (ts: unknown) => {
-  const d = new Date(String(ts));
-  return `${d.getUTCDate()}/${d.getUTCMonth() + 1} ${String(d.getUTCHours()).padStart(2, "0")}.${String(d.getUTCMinutes()).padStart(2, "0")}`;
-};
-
+function ago(ts: unknown): string {
+  const h = (Date.now() - new Date(String(ts)).getTime()) / 3_600_000;
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))} mnt lalu`;
+  if (h < 24) return `${Math.round(h)} jam lalu`;
+  return `${Math.round(h / 24)} hari lalu`;
+}
+const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" ? "chip chip-warning" : "chip";
 ---
-<Base title="Pipeline Lead" tenantName={tenant.name}>
-  {urgent.length > 0 && (
-    <div class="relative overflow-hidden rounded-xl border border-[color:var(--danger)]/40 px-4 py-3" style="background: linear-gradient(135deg, rgb(239 68 68 / 0.12), transparent);">
-      <div class="flex items-center gap-3">
-        <span class="pulse-dot" style="background:var(--danger)"></span>
-        <div class="flex-1 text-sm">
-          <strong>OTOMATIS: {urgent.length} lead MENDESAK</strong> belum ditangani &gt;12 jam ·
-          potensi <strong class="text-[color:var(--danger)]">{fmtRpShort(urgentValue)}</strong> terancam hilang.
-          Email reminder terkirim 07:00 tiap pagi.
+<Base title="Pipeline per Channel" tenantName={tenant.name}>
+  <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="relative z-10 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div class="max-w-xl">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Pipeline · terbaca otomatis per channel</div>
+        <div class="mt-1 text-display text-2xl sm:text-3xl">
+          {total > 0
+            ? `${fmtInt(total)} prospek · potensi ${fmtRpShort(potTotal)}`
+            : "Menunggu prospek pertama"}
         </div>
-        <a href="#kanban" class="btn btn-primary !py-1 text-xs">Tangani →</a>
+        <p class="mt-2 text-sm text-white/80">
+          {total > 0
+            ? best
+              ? `Channel terbaik: ${best.name} (${fmtInt(best.leads)} prospek, potensi ${fmtRpShort(best.est)}). Status dihitung otomatis — tanpa isi form.`
+              : "Data prospek mulai terbaca."
+            : "Setiap klik WhatsApp di situs otomatis masuk sini lengkap dengan channel asalnya (Meta, Google, organik, promo, langsung)."}
+        </p>
+      </div>
+      <div class="grid gap-2">
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Prospek HOT</div>
+          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold" style="color:#f87171">{hotN}</div>
+          <div class="text-[10px] text-white/55">skor ≥70 · tangani dulu</div>
+        </div>
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Jam tersibuk</div>
+          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold">{total > 0 ? `${peakHour}.00` : "—"}</div>
+        </div>
       </div>
     </div>
-  )}
-  <p class="mt-3 text-sm text-[color:var(--text-muted)]">
-    {tenant.name} · {total > 0
-      ? `${fmtInt(total)} lead 30 hari terakhir${total > 0 ? ` — jam tersibuk ${peakHour}.00` : ""}. Skor & estimasi nilai dihitung otomatis.`
-      : "Belum ada lead 30 hari terakhir — data mulai mengalir dari gateway CAPI."}
-    {stale.length > 0 && <span class="chip chip-danger ml-2">⏰ {stale.length} belum dibalas &gt;24 jam</span>}
-  </p>
-
-  <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Lead 30 hari" value={fmtInt(total)} hint="klik WhatsApp dari web" spark={days.map((d) => dayMap.get(d) ?? 0)} />
-    <StatCard label="Lead HOT" value={String(scored.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length)} hint="skor ≥70 · tangani dulu" warn={scored.some((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru")} />
-    <StatCard label="Deal tercatat" value={fmtRp(revTotal)} hint={`${byStatus("deal").length} deal · revenue per sumber di bawah`} />
-    <StatCard label="Perlu follow-up" value={String(urgent.length)} warn={urgent.length > 0} ok={urgent.length === 0 && total > 0} hint="BARU >12 jam · otomatis" />
   </div>
 
-  <h2 id="kanban" class="mt-5 font-[family-name:var(--font-heading)] text-sm font-bold">Pipeline <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">diurut otomatis: skor tertinggi dulu</span></h2>
-  <div class="mt-2 grid gap-3 md:grid-cols-4">
-    {cols.map((c) => (
-      <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/60 p-2">
-        <div class="flex items-center justify-between px-1.5 py-1">
-          <span class:list={["chip", c.cls]}>{c.label}</span>
-          <span class="font-[family-name:var(--font-mono-num)] text-xs text-[color:var(--text-faint)]">{byStatusScored(c.key).length}</span>
+  <!-- CHANNEL PERFORMANCE (otomatis) -->
+  <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    {channels.map((c) => (
+      <a href={c.href} class="card block p-4">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-[family-name:var(--font-heading)] text-sm font-bold">{c.name}</span>
+          <span class:list={[c.verdictCls, "text-[10px]"]}>{c.verdict}</span>
         </div>
-        <div class="space-y-2">
-          {byStatusScored(c.key).slice(0, 12).map((r) => {
-            const isStale = (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < staleMs;
-            const isUrgent = (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < urgentMs;
-            return (
-              <details class="card p-2.5 text-xs" style={isUrgent ? "border-color: var(--danger);" : ""}>
-                <summary class="cursor-pointer font-semibold leading-snug">
-                  <span class:list={[tierChip(r.sc.tier), "!text-[9px] mr-1"]}>{r.sc.tier} {r.sc.score}</span>
-                  {shortPage(r.pageUrl)}
-                  {isUrgent ? <span title="MENDESAK >12 jam"> 🔥</span> : isStale ? <span title="Belum dibalas >24 jam"> ⏰</span> : null}
-                </summary>
-                <div class="mt-1 text-[color:var(--text-faint)]">{fmtDate(r.ts)} · {r.source ?? "langsung"}</div>
-                <div class="mt-1 flex items-center gap-1.5">
-                  <span class="chip chip-success !text-[9px]">est. {fmtRpShort(r.dealValue ?? r.sc.estValue)}</span>
-                  <span class="text-[10px] text-[color:var(--text-faint)]" title={r.sc.reasons.join(", ")}>{r.sc.reasons.slice(0, 2).join(" · ")}</span>
-                </div>
-                {r.note && <div class="mt-1 rounded bg-[color:var(--bg-surface-2)] px-1.5 py-1 text-[color:var(--text-secondary)]">{r.note}</div>}
-                <form method="post" action="/api/pipeline/update" class="mt-2 space-y-1.5">
-                  <input type="hidden" name="id" value={r.id} />
-                  <div class="flex gap-1">
-                    {cols.map((o) => (
-                      <button name="status" value={o.key} type="submit" title={o.label}
-                        class:list={["flex-1 rounded-md px-1 py-1 text-[10px] font-bold",
-                          (r.status ?? "baru") === o.key ? "bg-[color:var(--brand)] text-white" : "bg-[color:var(--bg-surface-2)] text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"]}>
-                        {o.key === "baru" ? "Baru" : o.key === "dibalas" ? "Balas" : o.key === "deal" ? "Deal" : "Batal"}
-                      </button>
-                    ))}
-                  </div>
-                  <input name="deal_value" type="number" min="0" placeholder={`Nilai deal Rp (est. ${fmtRpShort(r.sc.estValue)})`} value={r.dealValue ?? ""} class="w-full !py-1 text-xs" />
-                  <input name="note" type="text" maxlength="500" placeholder="Catatan…" value={r.note ?? ""} class="w-full !py-1 text-xs" />
-                </form>
-              </details>
-            );
-          })}
-          {byStatusScored(c.key).length === 0 && <div class="px-1.5 py-3 text-center text-[11px] text-[color:var(--text-faint)]">Kosong</div>}
+        <div class="mt-2 flex items-baseline gap-3">
+          <span class="font-[family-name:var(--font-display)] text-2xl font-extrabold">{fmtInt(c.leads)}</span>
+          <span class="text-[11px] text-[color:var(--text-muted)]">prospek</span>
+          {c.est > 0 && <span class="ml-auto font-[family-name:var(--font-mono-num)] text-sm font-bold text-[color:var(--success)]">≈{fmtRpShort(c.est)}</span>}
         </div>
-      </div>
+        <div class="mt-1 flex items-center gap-2 text-[11px] text-[color:var(--text-muted)]">
+          <span class="truncate">{c.extra}</span>
+          {c.hot > 0 && <span class="chip chip-danger shrink-0 !text-[9px]">{c.hot} HOT</span>}
+          {c.stale > 0 && <span class="shrink-0 text-[color:var(--warning)]">⏰{c.stale}</span>}
+        </div>
+      </a>
     ))}
   </div>
 
-  {revBySource.size > 0 && (
+  <!-- ANTRIAN PRIORITAS (otomatis sort; 1-tap deal opsional) -->
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Antrian prioritas <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">skor tertinggi dulu · otomatis</span></h2>
+      <span class="chip text-[10px]">{queue.length} prospek</span>
+    </div>
+    {queue.length === 0 ? (
+      <div class="p-4"><EmptyState title="Belum ada prospek" message="Setiap klik WhatsApp di situs otomatis tercatat di sini lengkap dengan channel, skor, dan estimasi nilainya." mascot="peek" /></div>
+    ) : (
+    <ul class="divide-y divide-[color:var(--border-subtle)]">
+      {queue.map((r) => (
+        <li class="flex items-center gap-3 px-5 py-2.5 text-sm transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+          <span class:list={[tierChip(r.sc.tier), "!text-[9px] shrink-0"]}>{r.sc.tier} {r.sc.score}</span>
+          <div class="min-w-0 flex-1">
+            <div class="truncate font-medium">{shortPage(r.pageUrl)}</div>
+            <div class="text-[11px] text-[color:var(--text-faint)]">{ago(r.ts)} · {r.channel} · {(r.status ?? "baru") === "deal" ? `deal ${fmtRpShort(r.dealValue ?? 0)}` : r.sc.reasons.slice(0, 2).join(" · ")}</div>
+          </div>
+          <span class="hidden font-[family-name:var(--font-mono-num)] text-xs font-bold text-[color:var(--success)] sm:inline">≈{fmtRpShort(r.dealValue ?? r.sc.estValue)}</span>
+          {(r.status ?? "baru") !== "deal" && (r.status ?? "baru") !== "batal" && (
+            <form method="post" action="/api/pipeline/update">
+              <input type="hidden" name="id" value={r.id} />
+              <button name="status" value="deal" type="submit" title="Tandai deal (nilai otomatis)" class="btn shrink-0 !py-1 !text-[11px]">✓ Deal</button>
+            </form>
+          )}
+          {(r.status ?? "baru") === "deal" && <span class="chip chip-success shrink-0 !text-[9px]">DEAL</span>}
+        </li>
+      ))}
+    </ul>
+    )}
+  </div>
+
+  {revByCh.size > 0 && (
     <div class="card mt-4 p-4">
-      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Revenue per sumber <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">dari deal tercatat</span></h2>
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Pendapatan per channel <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">dari deal</span></h2>
       <div class="mt-2 grid gap-2 sm:grid-cols-3">
-        {[...revBySource.entries()].map(([s, v]) => (
+        {[...revByCh.entries()].map(([s, v]) => (
           <div class="rounded-lg bg-[color:var(--bg-surface-2)] px-3 py-2">
             <div class="text-[11px] text-[color:var(--text-muted)]">{s}</div>
-            <div class="font-[family-name:var(--font-mono-num)] text-lg font-bold">{fmtRp(v)}</div>
+            <div class="font-[family-name:var(--font-mono-num)] text-lg font-bold text-[color:var(--success)]">{fmtRp(v)}</div>
           </div>
         ))}
       </div>
     </div>
   )}
 
-  <div class="card mt-4 p-4">
-    <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Lead per hari</h2>
-    {total > 0 ? <BarChartLC data={days.map((d) => ({ label: d.slice(5), value: dayMap.get(d) ?? 0 }))} height={200} barClass="fill-[#25d366]" client:visible /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
-  </div>
-
-  <div class="card mt-4 p-4">
-    <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Jam sibuk</h2>
-    {total > 0 ? <LineChartLC data={hours.map((v, h) => ({ date: `2026-01-01T${String(h).padStart(2, "0")}:00`, value: v }))} height={200}  client:visible /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
+  <div class="mt-4 grid gap-4 lg:grid-cols-2">
+    <div class="card p-4">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Prospek per hari</h2>
+      <div class="mt-2">{total > 0 ? <BarChartLC data={days.map((d) => ({ label: d.slice(5), value: dayMap.get(d) ?? 0 }))} height={200} barClass="fill-[#25d366]" client:visible /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}</div>
+    </div>
+    <div class="card p-4">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Jam sibuk</h2>
+      <div class="mt-2">{total > 0 ? <LineChartLC data={hours.map((v, h) => ({ date: `2026-01-01T${String(h).padStart(2, "0")}:00`, value: v }))} height={200} client:visible /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}</div>
+    </div>
   </div>
 </Base>
