@@ -5,9 +5,14 @@ import { articlesView, dailyMetrics, rankSnapshots, tenants } from "../../drizzl
 import type { Tenant } from "./tenant";
 import { resolveTenant } from "./tenant";
 
-export async function getRequestTenant(host: string, pathname: string, searchParams: URLSearchParams, isSuperadmin: boolean): Promise<Tenant | null> {
+export async function getRequestTenant(host: string, pathname: string, searchParams: URLSearchParams, isSuperadmin: boolean, tenantIdOverride?: number): Promise<Tenant | null> {
   const t = await resolveTenant(host, pathname);
   if (t) return t;
+  if (tenantIdOverride) {
+    const db = getDb();
+    const rows = await db.select().from(tenants).where(eq(tenants.id, tenantIdOverride)).limit(1);
+    if (rows[0]) return { id: rows[0].id, slug: rows[0].slug, name: rows[0].name, domain: rows[0].domain };
+  }
   if (isSuperadmin) {
     const slug = searchParams.get("tenant") ?? "sariglass";
     const db = getDb();

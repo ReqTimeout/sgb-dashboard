@@ -1,0 +1,117 @@
+---
+import Base from "../layouts/Base.astro";
+import StatCard from "../components/StatCard.astro";
+import BarChartLC from "../components/BarChartLC.svelte";
+import { getRequestTenant, series, sumRange } from "../lib/data";
+import { fmtInt, fmtRp } from "../lib/insights";
+import { randomBytes } from "node:crypto";
+import { getDb } from "../lib/db";
+import { sharedLinks } from "../../drizzle/schema";
+import { desc, eq } from "drizzle-orm";
+import type { APIRoute } from "astro";
+
+export const prerender = false;
+export const POST: APIRoute = async ({ request, locals, url }) => {
+  const me = locals.user;
+  if (!me) return new Response("Unauthorized", { status: 401 });
+  const t = await getRequestTenant(url.host, "/share", new URLSearchParams(), me.role === "superadmin");
+  if (!t) return new Response("Tenant tidak ditemukan", { status: 404 });
+  const form = await request.formData();
+  const db2 = getDb();
+  const token = randomBytes(18).toString("hex").slice(0, 32);
+  const label = String(form.get("label") ?? "Laporan publik").slice(0, 64) || "Laporan publik";
+  const days = Math.min(90, Math.max(1, Number(form.get("days") ?? 30)));
+  await db2.insert(sharedLinks).values({
+    tenantId: t.id, token, label,
+    expiresAt: new Date(Date.now() + days * 86400000),
+  });
+  return new Response(null, { status: 302, headers: { Location: `/share?msg=created&token=${token}` } });
+};
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const mSpend = sumRange(await series(tenant.id, "meta_ads", "spend", 30), 30, 0);
+const mChats = Math.round(sumRange(await series(tenant.id, "meta_ads", "leads", 30), 30, 0));
+const gSpend = sumRange(await series(tenant.id, "google_ads", "spend", 30), 30, 0);
+const gConv = Math.round(sumRange(await series(tenant.id, "google_ads", "conversions", 30), 30, 0));
+const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0));
+const spendDaily = await series(tenant.id, "meta_ads", "spend", 14);
+
+const db = getDb();
+const links = await db.select().from(sharedLinks).where(eq(sharedLinks.tenantId, tenant.id)).orderBy(desc(sharedLinks.createdAt)).limit(20);
+
+const msg = Astro.url.searchParams.get("msg");
+const newToken = Astro.url.searchParams.get("token");
+---
+<Base title="Share Link Publik" tenantName={tenant.name}>
+  <p class="text-sm text-[color:var(--text-muted)]">Hasilkan link publik read-only untuk dikirim ke klien · tanpa login · expired otomatis.</p>
+
+  {msg === "created" && newToken && (
+    <div class="card mt-3 border-[color:var(--success)]/40 p-4" style="background: var(--c-good-soft);">
+      <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--success)]">Link berhasil dibuat</div>
+      <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <code class="flex-1 truncate rounded bg-[color:var(--bg-surface)] px-3 py-2 text-sm">https://sgb.beriklan.co.id/share/{newToken}</code>
+        <a href={`/share/{newToken}`} target="_blank" rel="noopener" class="btn btn-primary !py-1.5 text-xs">Buka ↗</a>
+      </div>
+      <p class="mt-2 text-[11px] text-[color:var(--text-muted)]">Copy link ini lalu kirim ke klien. Link aktif sampai 30 hari ke depan.</p>
+    </div>
+  )}
+
+  <div class="mt-4 grid gap-4 lg:grid-cols-3">
+    <form method="post" class="card p-5">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Buat link baru</h2>
+      <label class="mt-3 block text-sm">
+        <span class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Label</span>
+        <input name="label" maxlength="64" placeholder="Laporan Mei" class="mt-1 w-full" />
+      </label>
+      <label class="mt-3 block text-sm">
+        <span class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Berlaku (hari)</span>
+        <input name="days" type="number" min="1" max="90" value="30" class="mt-1 w-full" />
+      </label>
+      <button class="btn btn-primary mt-4 w-full justify-center" type="submit">Buat link publik</button>
+    </form>
+
+    <div class="card p-5 lg:col-span-2">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Preview publik <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">ringkasan otomatis</span></h2>
+      <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Klik Google" value={fmtInt(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0))} />
+        <StatCard label="Belanja iklan" value={fmtRp(mSpend + gSpend)} />
+        <StatCard label="Lead / konversi" value={fmtInt(mChats + gConv)} ok={mChats + gConv > 0} />
+        <StatCard label="Nilai SEO" value={fmtRp(orgClicks * 1500)} hint="estimasi" ok={orgClicks > 0} />
+      </div>
+      <div class="mt-3">
+        <BarChartLC data={spendDaily.slice(-14).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={160} barClass="fill-[#0081fb]" client:visible />
+      </div>
+      <div class="divider-fade my-3"></div>
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div><span class="text-[color:var(--text-muted)]">Meta · chat</span> <strong>{fmtInt(mChats)}</strong></div>
+        <div><span class="text-[color:var(--text-muted)]">Google · konversi</span> <strong>{fmtInt(gConv)}</strong></div>
+        <div><span class="text-[color:var(--text-muted)]">Meta · CPA</span> <strong>{mChats ? fmtRp(Math.round(mSpend / mChats)) : "—"}</strong></div>
+        <div><span class="text-[color:var(--text-muted)]">Organik · klik</span> <strong>{fmtInt(orgClicks)}</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Link aktif</h2>
+      <span class="chip text-[10px]">{links.length}</span>
+    </div>
+    {links.length === 0 ? (
+      <p class="px-5 py-6 text-sm text-[color:var(--text-faint)]">Belum ada link.</p>
+    ) : (
+      <ul class="divide-y divide-[color:var(--border-subtle)]">
+        {links.map((l) => (
+          <li class="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
+            <span class="font-[family-name:var(--font-heading)] text-sm font-bold">{l.label ?? "—"}</span>
+            <code class="truncate text-[11px] text-[color:var(--text-muted)] flex-1">/share/{l.token}</code>
+            <span class="text-[11px] text-[color:var(--text-faint)]">{l.expiresAt ? `s/d ${new Date(l.expiresAt).toLocaleDateString("id-ID")}` : "permanen"}</span>
+            <a href={`/share/{l.token}`} target="_blank" rel="noopener" class="btn !py-0.5 !px-2 text-[11px]">Buka</a>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+</Base>

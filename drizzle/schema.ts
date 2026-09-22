@@ -89,6 +89,15 @@ export const competitorWatch = mysqlTable(
   (t) => [uniqueIndex("uq_watch").on(t.tenantId, t.pageName)],
 );
 
+export const sharedLinks = mysqlTable("shared_links", {
+  id: serial("id").primaryKey(),
+  tenantId: int("tenant_id").notNull(),
+  token: varchar("token", { length: 64 }).notNull(),
+  label: varchar("label", { length: 64 }),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [uniqueIndex("uq_token").on(t.token)]);
+
 export const competitorAds = mysqlTable("competitor_ads", {
   id: serial("id").primaryKey(),
   tenantId: int("tenant_id").notNull(),
