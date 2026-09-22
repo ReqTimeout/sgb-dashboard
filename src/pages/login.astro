@@ -3,25 +3,61 @@ import Base from "../layouts/Base.astro";
 const next = Astro.url.searchParams.get("next") ?? "/";
 const err = Astro.url.searchParams.get("err");
 ---
-<Base title="Masuk">
-  <div class="mx-auto max-w-sm rounded-2xl border border-slate-200 bg-white p-6">
-    <h1 class="font-heading text-xl font-bold">Masuk Dashboard</h1>
-    {err && <p class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">Email atau password salah.</p>}
-    <form method="post" action="/api/auth/login" class="mt-4 space-y-3">
-      <input type="hidden" name="next" value={next} />
-      <label class="block text-sm">
-        <span class="text-slate-500">Email</span>
-        <input name="email" type="email" required autocomplete="username"
-          class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-safety-400 focus:outline-none" />
-      </label>
-      <label class="block text-sm">
-        <span class="text-slate-500">Password</span>
-        <input name="password" type="password" required autocomplete="current-password"
-          class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-safety-400 focus:outline-none" />
-      </label>
-      <button class="w-full rounded-lg bg-brand-600 py-2 font-heading font-bold text-white hover:bg-brand-700" type="submit">
-        Masuk
-      </button>
-    </form>
+<Base title="Masuk" bare>
+  <div class="grid min-h-screen lg:grid-cols-2">
+    <!-- Brand panel -->
+    <div class="relative hidden flex-col justify-between overflow-hidden p-10 lg:flex" style="background:#1C1917;color:#fff">
+      <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+      <a href="/" class="flex items-center gap-2.5">
+        <span class="grid h-9 w-9 place-items-center rounded-lg bg-[color:var(--brand)] font-[family-name:var(--font-display)] text-base font-extrabold text-white">B</span>
+        <span class="font-[family-name:var(--font-heading)] text-[15px] font-extrabold tracking-tight">Beriklan <span class="font-semibold opacity-60">Dashboard</span></span>
+      </a>
+      <div class="relative z-10">
+        <div class="mb-5 grid h-20 w-20 place-items-center rounded-2xl bg-white/10">
+          <svg class="h-10 w-10" viewBox="0 0 24 24" fill="none" stroke="#FACC15" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12V8m0 0V6a2 2 0 1 1 4 0v2m0 0V6a2 2 0 1 1 4 0v6c0 4-2 7-5 7s-5-3-5-7m2-3h.01" /></svg>
+        </div>
+        <h1 class="font-[family-name:var(--font-display)] text-4xl font-extrabold leading-tight tracking-tight">
+          Semua angka<br />bisnismu, <span style="color:#FACC15">tiap pagi.</span>
+        </h1>
+        <p class="mt-3 max-w-sm text-sm leading-relaxed text-white/70">
+          Klik Google, lead WhatsApp, spend iklan, artikel terbit — dilaporkan otomatis 06:45 WIB, tanpa diminta.
+        </p>
+        <div class="mt-6 flex gap-2 text-[11px] font-semibold">
+          <span class="rounded-full bg-white/10 px-3 py-1">SEO otomatis</span>
+          <span class="rounded-full bg-white/10 px-3 py-1">Meta + Google Ads</span>
+          <span class="rounded-full bg-white/10 px-3 py-1">Lead WA</span>
+        </div>
+      </div>
+      <div class="relative z-10 text-[11px] text-white/50">Beriklan Agency · sgb.beriklan.co.id</div>
+      <div
+        class="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full"
+        style="background:radial-gradient(circle, rgb(220 38 38 / 0.35), transparent 70%)"
+      ></div>
+    </div>
+
+    <!-- Form -->
+    <div class="flex items-center justify-center bg-[color:var(--bg-canvas)] px-6 py-12">
+      <div class="card w-full max-w-sm p-7">
+        <div class="flex items-center gap-2.5 lg:hidden">
+          <span class="grid h-9 w-9 place-items-center rounded-lg bg-[color:var(--brand)] font-[family-name:var(--font-display)] text-base font-extrabold text-white">B</span>
+          <span class="font-[family-name:var(--font-heading)] text-[15px] font-extrabold tracking-tight">Beriklan <span class="font-semibold text-[color:var(--text-faint)]">Dashboard</span></span>
+        </div>
+        <h2 class="mt-4 font-[family-name:var(--font-heading)] text-xl font-extrabold tracking-tight">Selamat datang kembali 👋</h2>
+        <p class="mt-1 text-sm text-[color:var(--text-muted)]">Masuk untuk lihat laporan pagimu.</p>
+        {err && <p class="mt-4 rounded-lg bg-[color:var(--danger-soft)] px-3 py-2 text-sm font-medium text-[color:var(--danger)]">Email atau password salah.</p>}
+        <form method="post" action="/api/auth/login" class="mt-5 space-y-3.5">
+          <input type="hidden" name="next" value={next} />
+          <label class="block text-sm">
+            <span class="font-semibold text-[color:var(--text-secondary)]">Email</span>
+            <input name="email" type="email" required autocomplete="username" placeholder="nama@email.com" class="mt-1.5 w-full" />
+          </label>
+          <label class="block text-sm">
+            <span class="font-semibold text-[color:var(--text-secondary)]">Password</span>
+            <input name="password" type="password" required autocomplete="current-password" placeholder="••••••••" class="mt-1.5 w-full" />
+          </label>
+          <button class="btn btn-primary mt-1 w-full justify-center py-2.5" type="submit">Masuk Dashboard</button>
+        </form>
+      </div>
+    </div>
   </div>
 </Base>

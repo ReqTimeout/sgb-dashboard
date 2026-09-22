@@ -12,8 +12,9 @@ interface Props {
   title: string;
   tenantName?: string;
   alertCount?: number;
+  bare?: boolean;
 }
-const { title, tenantName = "Sari Glass Bangunan", alertCount = 0 } = Astro.props;
+const { title, tenantName = "Sari Glass Bangunan", alertCount = 0, bare = false } = Astro.props;
 const user = Astro.locals.user;
 const current = Astro.url.pathname;
 ---
@@ -38,6 +39,9 @@ const current = Astro.url.pathname;
     <title>{title} · Beriklan Agency</title>
   </head>
   <body class="bg-[color:var(--bg-canvas)] text-[color:var(--text-primary)]">
+    {bare ? (
+      <slot />
+    ) : (
     <div class="flex min-h-screen">
       <Sidebar current={current} user={user ? { email: user.email, role: user.role } : null} tenantName={tenantName} alertCount={alertCount} />
 
@@ -71,5 +75,6 @@ const current = Astro.url.pathname;
     </div>
 
     <Toaster richColors closeButton position="bottom-right" />
+    )}
   </body>
 </html>
