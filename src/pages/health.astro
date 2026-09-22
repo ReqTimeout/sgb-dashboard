@@ -16,7 +16,6 @@ const healthy = (errRuns?.value ?? 0) === 0;
 const crons = ["publish-articles", "seo-publish-pipeline", "sitemap-ping", "daily-report (P4)", "gsc-indexing", "indexnow", "gsc-url-inspection", "llm-search-ping", "health-check", "weekly-report", "push-metrics (P2)"];
 ---
 <Base title="System Health">
-  <h1 class="font-heading text-2xl font-bold tracking-tight">System Health <span class="font-body text-sm font-normal text-slate-400">agency only</span></h1>
   <p class="mt-1 text-sm text-slate-500">{tenant.name} · ringkasan 24 jam terakhir (dari push-metrics 05:00 WIB)</p>
 
   <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">

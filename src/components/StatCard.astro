@@ -1,0 +1,42 @@
+---
+import Sparkline from "./Sparkline.astro";
+
+interface Props {
+  label: string;
+  value: string | number;
+  delta?: number;
+  deltaLabel?: string;
+  hint?: string;
+  spark?: number[];
+  warn?: boolean;
+}
+const { label, value, delta, deltaLabel, hint, spark, warn } = Astro.props;
+const deltaPos = (delta ?? 0) > 0;
+const deltaNeg = (delta ?? 0) < 0;
+const deltaCls = warn
+  ? "chip-danger"
+  : deltaPos
+    ? "chip-success"
+    : deltaNeg
+      ? "chip-danger"
+      : "chip";
+const deltaSign = deltaPos ? "▲" : deltaNeg ? "▼" : "·";
+---
+<div class="card relative p-4">
+  <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">{label}</div>
+  <div class="mt-1 flex items-baseline gap-2">
+    <span class="font-[family-name:var(--font-display)] text-[28px] font-extrabold leading-none tracking-tight">{value}</span>
+    {delta !== undefined && (
+      <span class:list={["chip", deltaCls, "text-[10px]"]}>
+        <span>{deltaSign}{Math.abs(delta).toFixed(0)}%</span>
+        {deltaLabel && <span class="font-normal text-[color:var(--text-faint)]"> {deltaLabel}</span>}
+      </span>
+    )}
+  </div>
+  {hint && <div class="mt-1 text-[11px] text-[color:var(--text-muted)]">{hint}</div>}
+  {spark && spark.length > 1 && (
+    <div class="mt-2 -mb-1 -mx-1">
+      <Sparkline values={spark} stroke={warn ? "var(--danger)" : "var(--brand)"} />
+    </div>
+  )}
+</div>

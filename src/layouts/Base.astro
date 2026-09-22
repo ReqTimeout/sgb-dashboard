@@ -4,69 +4,72 @@ import "@fontsource-variable/plus-jakarta-sans";
 import "@fontsource-variable/inter";
 import "@fontsource/geist-mono";
 import "../styles/global.css";
+import Sidebar from "../components/Sidebar.astro";
+import CommandPalette from "../components/CommandPalette.svelte";
+import { Toaster } from "svelte-sonner";
 
 interface Props {
   title: string;
+  tenantName?: string;
+  alertCount?: number;
 }
-const { title } = Astro.props;
+const { title, tenantName = "Sari Glass Bangunan", alertCount = 0 } = Astro.props;
 const user = Astro.locals.user;
+const current = Astro.url.pathname;
 ---
 <!doctype html>
 <html lang="id">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title} · Beriklan Agency</title>
     <meta name="description" content="Dashboard performa SEO, iklan & lead — Beriklan Agency." />
     <meta name="theme-color" content="#DC2626" />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23DC2626'/%3E%3Cpath d='M10 8h8v3.5h-4.2v2.6H17v3.4h-3.2v2.7H18V24h-8z' fill='white'/%3E%3Crect x='20' y='8' width='2.4' height='16' fill='%23FACC15'/%3E%3C/svg%3E"
     />
+    <script is:inline>
+      try {
+        const saved = localStorage.getItem("beriklan-theme");
+        if (saved === "dark") document.documentElement.classList.add("dark");
+        else if (saved === null && matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");
+      } catch (e) {}
+    </script>
+    <title>{title} · Beriklan Agency</title>
   </head>
-  <body class="font-body bg-slate-50 text-slate-900 antialiased">
-    <header class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-md">
-      <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-        <a href="/" class="flex items-center gap-2.5">
-          <span
-            class="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 font-heading text-sm font-extrabold text-white shadow-sm shadow-brand-600/30">B</span>
-          <span class="font-heading text-base font-extrabold tracking-tight">
-            Beriklan <span class="font-semibold text-slate-400">Dashboard</span>
-          </span>
-        </a>
-        <nav class="hidden items-center gap-1 text-sm md:flex">
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/">Pagi ini</a>
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/seo">SEO</a>
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/ranking">Ranking</a>
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/konten">Konten</a>
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/leads">Leads</a>
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/laporan">Laporan</a>
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/iklan">Iklan</a>
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/roi">ROI</a>
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/keywords">Keyword</a>
-          {user?.role === "superadmin" && <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/hq">HQ</a>}
-          <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/ai">AI</a>
-          {user?.role === "superadmin" && <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/health">Health</a>}
-        </nav>
-        <nav class="flex items-center gap-3 text-sm">
-          {user ? (
-            <>
-              <span class="hidden text-slate-500 sm:inline">{user.email} · {user.role}</span>
-              <form method="post" action="/api/auth/logout">
-                <button class="rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-100" type="submit">Keluar</button>
-              </form>
-            </>
-          ) : (
-            <a class="rounded-lg bg-brand-600 px-3 py-1.5 font-semibold text-white" href="/login">Masuk</a>
-          )}
-        </nav>
-      </div>
-    </header>
-    <main class="mx-auto max-w-5xl px-4 py-8">
-      <slot />
-    </main>
-    <footer class="mx-auto max-w-5xl px-4 pb-8 text-xs text-slate-400">
-      <span class="font-semibold text-slate-500">Beriklan Agency</span> · laporan otomatis tiap pagi · sgb.beriklan.co.id
-    </footer>
+  <body class="bg-[color:var(--bg-canvas)] text-[color:var(--text-primary)]">
+    <div class="flex min-h-screen">
+      <Sidebar current={current} user={user ? { email: user.email, role: user.role } : null} tenantName={tenantName} alertCount={alertCount} />
+
+      <main class="flex-1 min-w-0">
+        <header class="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-canvas)]/85 px-6 py-3 backdrop-blur-md">
+          <div class="min-w-0">
+            <h1 class="font-[family-name:var(--font-heading)] text-[15px] font-bold leading-none tracking-tight">{title}</h1>
+            <p class="mt-0.5 truncate text-[11px] text-[color:var(--text-faint)]">Data otomatis tiap pagi · {tenantName}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <CommandPalette client:load />
+            <button class="btn btn-ghost relative h-9 w-9 justify-center px-0" aria-label="Notifikasi" title="Notifikasi">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9m5 13a2 2 0 0 0 4 0"/></svg>
+              {alertCount > 0 && (
+                <span class="absolute -right-0.5 -top-0.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-[color:var(--danger)] px-1 text-[9px] font-bold text-white">{alertCount}</span>
+              )}
+            </button>
+          </div>
+        </header>
+
+        <div class="mx-auto max-w-6xl px-6 py-6">
+          <slot />
+        </div>
+
+        <footer class="mx-auto max-w-6xl px-6 pb-10 pt-6 text-[11px] text-[color:var(--text-faint)]">
+          <span class="font-semibold text-[color:var(--text-secondary)]">Beriklan Agency</span>
+          · laporan otomatis tiap pagi ·
+          <a href="/" class="hover:text-[color:var(--brand)]">sgb.beriklan.co.id</a>
+        </footer>
+      </main>
+    </div>
+
+    <Toaster richColors closeButton position="bottom-right" />
   </body>
 </html>

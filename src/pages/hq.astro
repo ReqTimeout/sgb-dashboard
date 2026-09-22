@@ -47,7 +47,6 @@ const cards = await tenantCards();
 const notes = await db.select().from(notesInternal).orderBy(desc(notesInternal.createdAt)).limit(10);
 ---
 <Base title="HQ Overview">
-  <h1 class="font-heading text-2xl font-bold tracking-tight">HQ Overview <span class="font-body text-sm font-normal text-slate-400">agency only</span></h1>
   <p class="mt-1 text-sm text-slate-500">Semua klien dalam satu layar.</p>
 
   <div class="mt-6 grid gap-3 sm:grid-cols-2">

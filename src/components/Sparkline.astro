@@ -1,0 +1,30 @@
+---
+interface Props {
+  values: number[];
+  stroke?: string;
+  height?: number;
+  fill?: boolean;
+}
+const { values, stroke = "var(--brand)", height = 36, fill = true } = Astro.props;
+const max = Math.max(...values, 1);
+const min = Math.min(...values, 0);
+const range = max - min || 1;
+const w = 200;
+const stepX = values.length > 1 ? w / (values.length - 1) : 0;
+const points = values.map((v, i) => {
+  const x = i * stepX;
+  const y = height - ((v - min) / range) * (height - 4) - 2;
+  return [x, y] as const;
+});
+const linePath = points.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+const areaPath = `${linePath} L${w},${height} L0,${height} Z`;
+---
+<svg
+  viewBox={`0 0 ${w} ${height}`}
+  preserveAspectRatio="none"
+  class="h-9 w-full"
+  aria-hidden="true"
+>
+  {fill && <path d={areaPath} fill={stroke} fill-opacity="0.10" />}
+  <path d={linePath} fill="none" stroke={stroke} stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

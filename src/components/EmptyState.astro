@@ -1,0 +1,21 @@
+---
+interface Props { title: string; message?: string; mascot?: "wave" | "peek" | "sad" | "search" | "thumbs"; ctaLabel?: string; ctaHref?: string; }
+const { title, message, mascot = "peek", ctaLabel, ctaHref } = Astro.props;
+const poses: Record<string, string> = {
+  wave: "M5 12V8m0 0V6a2 2 0 1 1 4 0v2m0 0V6a2 2 0 1 1 4 0v6c0 4-2 7-5 7s-5-3-5-7m2-3h.01",
+  peek: "M9 9h.01M15 9h.01M8 14c1.5 1.5 6.5 1.5 8 0",
+  sad: "M9 9h.01M15 9h.01M8 16c1.5-1.5 6.5-1.5 8 0",
+  search: "M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14m5 12 4 4",
+  thumbs: "M7 11v9H4v-9zM7 11l4-7c1 0 2 1 2 2v3h5a2 2 0 0 1 2 2l-2 7c-.4 1-1 2-2 2H7z",
+};
+---
+<div class="card flex flex-col items-center px-6 py-12 text-center">
+  <div class="mb-4 grid h-20 w-20 place-items-center rounded-full bg-[color:var(--brand-soft)] text-[color:var(--brand)]">
+    <svg class="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d={poses[mascot]} /></svg>
+  </div>
+  <h3 class="font-[family-name:var(--font-heading)] text-base font-bold">{title}</h3>
+  {message && <p class="mt-1 max-w-md text-sm text-[color:var(--text-muted)]">{message}</p>}
+  {ctaLabel && ctaHref && (
+    <a href={ctaHref} class="btn btn-primary mt-4">{ctaLabel}</a>
+  )}
+</div>

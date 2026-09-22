@@ -39,7 +39,6 @@ const pages = ranks.filter((r) => r.keyword.startsWith("page:")).slice(0, 10);
 const snapDate = ranks[0]?.date ?? null;
 ---
 <Base title="Performa SEO">
-  <h1 class="font-heading text-2xl font-bold tracking-tight">Performa SEO</h1>
   <p class="mt-1 text-sm text-slate-500">
     {tenant.name} · 90 hari terakhir
     {snapDate ? ` · data s.d. ${snapDate} (GSC delay ~2 hari)` : " · menunggu push GSC pertama"}
