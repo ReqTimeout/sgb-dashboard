@@ -72,6 +72,20 @@ const trackRows = [
 ];
 const trackOkCount = trackRows.filter((r) => r.ok).length;
 
+// D4.4: tarik rekomendasi kreatif dari cron terakhir
+let creativeTired: { id: string; name: string; reason: string; spend: number; freq: number }[] = [];
+try {
+  const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
+  const adminToken = process.env.SGB_INGEST_KEY ?? "";
+  const r = await fetch(`${adminUrl}/api/audit/crons?token=${encodeURIComponent(adminToken)}`);
+  if (r.ok) {
+    const j = await r.json();
+    const fatigueCron = (j.crons ?? []).find((c: { name: string }) => c.name === "creative-fatigue");
+    const raw = (fatigueCron?.summary?.tired ?? []) as { id: string; name: string; reason: string; spend: number; freq: number }[];
+    creativeTired = raw.slice(0, 10);
+  }
+} catch { /* abaikan */ }
+
 // Audit panel: fetch dari admin endpoint /api/audit/meta (token via env)
 let campaigns: { id: string; name: string; spend: number; clicks: number; chat_started: number; chat_replied: number; leads: number }[] = [];
 let summary: { active?: number; paused?: number; fetched_at?: string | null } = {};
@@ -89,7 +103,6 @@ try {
   }
 } catch (e) { auditError = String(e); }
 
-
 ---
 <Base title="Iklan" tenantName={tenant.name}>
   <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
@@ -99,13 +112,17 @@ try {
       <div>
         <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#34d399]">Performa Iklan — campaign AKTIF saja</div>
         <div class="mt-1 text-display text-3xl sm:text-4xl">
-          {mChats > 0 ? `${fmtRp(cpaChat)}` : "Belum ada"}
-          <span class="text-xl font-bold text-white/60">{mChats > 0 ? " /chat WA" : ""}</span>
+          {mChats > 0 && <span>{fmtRp(cpaChat)}</span>}
+          {mChats === 0 && <span>Belum ada</span>}
+          <span class="text-xl font-bold text-white/60">{mChats > 0 && " /chat WA"}</span>
         </div>
         <p class="mt-2 max-w-xl text-sm text-white/85">
-          {mChats > 0
-            ? `${fmtInt(mChats)} chat WA masuk dari ${fmtInt(mClicks)} klik, 30 hari terakhir. CPA per chat di benchmark Rp2-15rb untuk CTWA.`
-            : "Belum ada data 30 hari terakhir. Lead Pertama muncul setelah campaign AKTIF jalan minimal 1-2 hari."}
+          {mChats > 0 && (
+            <>{fmtInt(mChats)} chat WA masuk dari {fmtInt(mClicks)} klik, 30 hari terakhir. CPA per chat di benchmark Rp2-15rb untuk CTWA.</>
+          )}
+          {mChats === 0 && (
+            <>Belum ada data 30 hari terakhir. Lead Pertama muncul setelah campaign AKTIF jalan minimal 1-2 hari.</>
+          )}
         </p>
       </div>
       <div class="grid gap-2 sm:gap-3">
@@ -128,7 +145,6 @@ try {
     <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"}`} warn={mChats > 0 && cpaChat > 15000} ok={mChats > 0 && cpaChat <= 15000} />
   </div>
 
-  <!-- PERBANDINGAN ORGANIK VS IKLAN -->
   {oClicks > 0 && mSpend > 0 && (
     <div class="card mt-4 p-5">
       <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Perbandingan 30 hari</div>
@@ -173,12 +189,9 @@ try {
     )}
   </div>
 
-  <!-- TRACKING HEALTH: CAPI + GTM + dedupe -->
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
-      <div>
-        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🛰️ Status Tracking <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">CAPI · GTM · dedupe — dicek live tiap buka halaman</span></h2>
-      </div>
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🛰️ Status Tracking <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">CAPI · GTM · dedupe — dicek live tiap buka halaman</span></h2>
       <span class:list={["chip text-[10px]", trackOkCount === trackRows.length ? "chip-success" : trackOkCount >= 2 ? "chip-warning" : "chip-danger"]}>{trackOkCount}/{trackRows.length} sehat</span>
     </div>
     <ul class="divide-y divide-[color:var(--border-subtle)]">
@@ -196,12 +209,35 @@ try {
     </div>
   </div>
 
-  <!-- AUDIT PANEL: read-only per-campaign breakdown -->
+  {creativeTired.length > 0 && (
+    <div class="card mt-4 overflow-hidden">
+      <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <div>
+          <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">⚙️ Rekomendasi kreatif <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">read-only · disetujui manual di UI Meta</span></h2>
+          <p class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">Dari cron creative-fatigue · {creativeTired.length} adset butuh perhatian</p>
+        </div>
+        <span class="chip chip-warning text-[10px]">TIDAK otomatis</span>
+      </div>
+      <ul class="divide-y divide-[color:var(--border-subtle)]">
+        {creativeTired.map((t) => (
+          <li class="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="truncate text-sm font-semibold">{t.name}</div>
+              <div class="mt-0.5 text-[11px] text-[color:var(--text-muted)]">{t.reason}</div>
+              <div class="mt-0.5 text-[10px] text-[color:var(--text-faint)]">spend {fmtRp(t.spend)} · freq {t.freq.toFixed(1)}</div>
+            </div>
+            <a href={`https://adsmanager.facebook.com/adsmanager/manage/adset?act=3386380068089099&selected_adset_ids=${t.id}`} target="_blank" rel="noopener" class="btn shrink-0 !py-1 text-xs">Setujui manual ↗</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )}
+
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
       <div>
         <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🔍 Audit Meta Ads <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">read-only · snapshot cron 05:30 WIB</span></h2>
-        <p class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">Hanya campaign <strong class="text-[color:var(--success)]">AKTIF</strong>. {summary.active != null ? `${summary.active} AKTIF, ${summary.paused ?? 0} PAUSED disembunyikan.` : "Menunggu cron berikutnya."}</p>
+        <p class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">Hanya campaign <strong class="text-[color:var(--success)]">AKTIF</strong>. {summary.active != null && `${summary.active} AKTIF, ${summary.paused ?? 0} PAUSED disembunyikan.`}{summary.active == null && "Menunggu cron berikutnya."}</p>
       </div>
       <span class="chip chip-warning text-[10px]">Tidak ada perubahan dilakukan</span>
     </div>
@@ -254,7 +290,7 @@ try {
       </div>
     )}
     <div class="border-t border-[color:var(--border-subtle)] px-5 py-3 text-[11px] text-[color:var(--text-faint)]">
-      💡 <strong class="text-[color:var(--text-secondary)]">Benchmark CTWA Indonesia:</strong> CPA per chat Rp2-15rb (sehat), Rp15-30rb (pantau), &gt;Rp30rb (mahal). Lihat IMPROVEMENT.md §D2 untuk konteks.
+      💡 <strong class="text-[color:var(--text-secondary)]">Benchmark CTWA Indonesia:</strong> CPA per chat Rp2-15rb (sehat), Rp15-30rb (pantau), {">"}Rp30rb (mahal). Lihat IMPROVEMENT.md §D2 untuk konteks.
     </div>
   </div>
 
