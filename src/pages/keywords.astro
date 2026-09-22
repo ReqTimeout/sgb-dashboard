@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import EmptyState from "../components/EmptyState.astro";
 import { getRequestTenant } from "../lib/data";
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../lib/db";
@@ -43,13 +44,23 @@ const chip: Record<string, string> = {
     ) : null)}
   </div>
 
-  <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+  {list.length === 0 ? (
+    <div class="mt-4">
+      <EmptyState
+        title={filter ? `Tidak ada keyword berstatus "${filter}"` : "Belum ada keyword"}
+        message={filter ? "Coba filter lain, atau tunggu snapshot berikutnya." : "Snapshot keyword pertama jalan 05:10 WIB — halaman ini terisi otomatis."}
+        mascot="search"
+        ctaLabel={filter ? "Lihat semua" : undefined}
+        ctaHref={filter ? "/keywords" : undefined}
+      />
+    </div>
+  ) : (
+  <div class="card mt-4 overflow-x-auto !p-0">
     <table class="w-full min-w-[560px] text-sm">
-      <thead><tr class="text-left text-xs text-slate-400"><th class="px-4 py-2">Keyword</th><th class="px-2 py-2">Status</th><th class="px-2 py-2">Artikel</th><th class="px-4 py-2 text-right">Prioritas</th></tr></thead>
+      <thead><tr class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]"><th class="px-4 py-2.5">Keyword</th><th class="px-2 py-2.5">Status</th><th class="px-2 py-2.5">Artikel</th><th class="px-4 py-2.5 text-right">Prioritas</th></tr></thead>
       <tbody>
-        {list.length === 0 && <tr><td colspan="4" class="px-4 py-8 text-center text-slate-400">Belum ada data — snapshot keyword pertama jalan 05:10 WIB.</td></tr>}
         {list.map((r) => (
-          <tr class="border-t border-slate-100">
+          <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
             <td class="px-4 py-2 font-medium">{r.keyword}</td>
             <td class="px-2 py-2"><span class={`rounded-full px-2 py-0.5 text-xs font-bold ${chip[r.status] ?? "bg-slate-100 text-slate-600"}`}>{r.status}</span></td>
             <td class="px-2 py-2 font-mono-num text-xs text-slate-500">{r.articleSlug ?? "—"}</td>
@@ -59,5 +70,6 @@ const chip: Record<string, string> = {
       </tbody>
     </table>
   </div>
+  )}
   <p class="mt-2 text-xs text-slate-400">Rantai status: antre → draft → terbit → ter-commit → diajukan (submit Google). Snapshot harian 05:10 WIB.</p>
 </Base>

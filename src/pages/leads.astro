@@ -4,6 +4,7 @@ import StatCard from "../components/StatCard.astro";
 import Chart from "../components/Chart.svelte";
 import { getRequestTenant } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
+import { scoreLead, fmtRpShort } from "../lib/ai/lead-score";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import { leadEvents } from "../../drizzle/schema";
@@ -46,8 +47,21 @@ const cols = [
   { key: "batal", label: "BATAL", cls: "chip" },
 ] as const;
 const byStatus = (s: string) => rows.filter((r) => (r.status ?? "baru") === s);
+// OTOMATIS: tiap lead dapat skor + estimasi nilai → sort prioritas tertinggi dulu
+const scored = rows.map((r) => ({
+  ...r,
+  sc: scoreLead({ pageUrl: r.pageUrl, source: r.source, ts: r.ts, status: r.status }),
+}));
+const byStatusScored = (s: string) =>
+  scored.filter((r) => (r.status ?? "baru") === s).sort((a, b) => b.sc.score - a.sc.score);
 const staleMs = Date.now() - 24 * 3600 * 1000;
+const urgentMs = Date.now() - 12 * 3600 * 1000;
 const stale = byStatus("baru").filter((r) => new Date(r.ts).getTime() < staleMs);
+// OTOMATIS: lead BARU >12 jam = MENDESAK + total potensi Rp yang terancam hilang
+const urgent = scored.filter((r) => (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < urgentMs);
+const urgentValue = urgent.reduce((a, r) => a + r.sc.estValue, 0);
+const tierChip = (t: string) =>
+  t === "HOT" ? "chip chip-danger" : t === "WARM" ? "chip chip-warning" : "chip";
 
 // Revenue per sumber
 const revBySource = new Map<string, number>();
@@ -81,52 +95,76 @@ const fmtDate = (ts: unknown) => {
 };
 ---
 <Base title="Pipeline Lead" tenantName={tenant.name}>
-  <p class="text-sm text-[color:var(--text-muted)]">
+  {urgent.length > 0 && (
+    <div class="relative overflow-hidden rounded-xl border border-[color:var(--danger)]/40 px-4 py-3" style="background: linear-gradient(135deg, rgb(239 68 68 / 0.12), transparent);">
+      <div class="flex items-center gap-3">
+        <span class="pulse-dot" style="background:var(--danger)"></span>
+        <div class="flex-1 text-sm">
+          <strong>OTOMATIS: {urgent.length} lead MENDESAK</strong> belum ditangani &gt;12 jam ·
+          potensi <strong class="text-[color:var(--danger)]">{fmtRpShort(urgentValue)}</strong> terancam hilang.
+          Email reminder terkirim 07:00 tiap pagi.
+        </div>
+        <a href="#kanban" class="btn btn-primary !py-1 text-xs">Tangani →</a>
+      </div>
+    </div>
+  )}
+  <p class="mt-3 text-sm text-[color:var(--text-muted)]">
     {tenant.name} · {total > 0
-      ? `${fmtInt(total)} lead 30 hari terakhir${total > 0 ? ` — jam tersibuk ${peakHour}.00` : ""}.`
+      ? `${fmtInt(total)} lead 30 hari terakhir${total > 0 ? ` — jam tersibuk ${peakHour}.00` : ""}. Skor & estimasi nilai dihitung otomatis.`
       : "Belum ada lead 30 hari terakhir — data mulai mengalir dari gateway CAPI."}
     {stale.length > 0 && <span class="chip chip-danger ml-2">⏰ {stale.length} belum dibalas &gt;24 jam</span>}
   </p>
 
-  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+  <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
     <StatCard label="Lead 30 hari" value={fmtInt(total)} hint="klik WhatsApp dari web" spark={days.map((d) => dayMap.get(d) ?? 0)} />
-    <StatCard label="Jam tersibuk" value={total > 0 ? `${peakHour}.00` : "—"} hint="waktu terbaik posting/promo" />
+    <StatCard label="Lead HOT" value={String(scored.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length)} hint="skor ≥70 · tangani dulu" warn={scored.some((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru")} />
     <StatCard label="Deal tercatat" value={fmtRp(revTotal)} hint={`${byStatus("deal").length} deal · revenue per sumber di bawah`} />
-    <StatCard label="Perlu follow-up" value={String(stale.length)} warn={stale.length > 0} hint="status BARU lebih dari 24 jam" />
+    <StatCard label="Perlu follow-up" value={String(urgent.length)} warn={urgent.length > 0} hint="BARU >12 jam · otomatis" />
   </div>
 
-  <h2 class="mt-6 font-[family-name:var(--font-heading)] text-sm font-bold">Pipeline</h2>
+  <h2 id="kanban" class="mt-5 font-[family-name:var(--font-heading)] text-sm font-bold">Pipeline <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">diurut otomatis: skor tertinggi dulu</span></h2>
   <div class="mt-2 grid gap-3 md:grid-cols-4">
     {cols.map((c) => (
       <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/60 p-2">
         <div class="flex items-center justify-between px-1.5 py-1">
           <span class:list={["chip", c.cls]}>{c.label}</span>
-          <span class="font-[family-name:var(--font-mono-num)] text-xs text-[color:var(--text-faint)]">{byStatus(c.key).length}</span>
+          <span class="font-[family-name:var(--font-mono-num)] text-xs text-[color:var(--text-faint)]">{byStatusScored(c.key).length}</span>
         </div>
         <div class="space-y-2">
-          {byStatus(c.key).slice(0, 12).map((r) => {
+          {byStatusScored(c.key).slice(0, 12).map((r) => {
             const isStale = (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < staleMs;
+            const isUrgent = (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < urgentMs;
             return (
-              <details class="card p-2.5 text-xs">
+              <details class="card p-2.5 text-xs" style={isUrgent ? "border-color: var(--danger);" : ""}>
                 <summary class="cursor-pointer font-semibold leading-snug">
+                  <span class:list={[tierChip(r.sc.tier), "!text-[9px] mr-1"]}>{r.sc.tier} {r.sc.score}</span>
                   {shortPage(r.pageUrl)}
-                  {isStale && <span title="Belum dibalas >24 jam"> ⏰</span>}
+                  {isUrgent ? <span title="MENDESAK >12 jam"> 🔥</span> : isStale ? <span title="Belum dibalas >24 jam"> ⏰</span> : null}
                 </summary>
-                <div class="mt-1 text-[color:var(--text-faint)]">{fmtDate(r.ts)} · {r.source ?? "langsung"}{r.dealValue ? ` · ${fmtRp(r.dealValue)}` : ""}</div>
+                <div class="mt-1 text-[color:var(--text-faint)]">{fmtDate(r.ts)} · {r.source ?? "langsung"}</div>
+                <div class="mt-1 flex items-center gap-1.5">
+                  <span class="chip chip-success !text-[9px]">est. {fmtRpShort(r.dealValue ?? r.sc.estValue)}</span>
+                  <span class="text-[10px] text-[color:var(--text-faint)]" title={r.sc.reasons.join(", ")}>{r.sc.reasons.slice(0, 2).join(" · ")}</span>
+                </div>
                 {r.note && <div class="mt-1 rounded bg-[color:var(--bg-surface-2)] px-1.5 py-1 text-[color:var(--text-secondary)]">{r.note}</div>}
                 <form method="post" action="/api/pipeline/update" class="mt-2 space-y-1.5">
                   <input type="hidden" name="id" value={r.id} />
-                  <select name="status" class="w-full !py-1 text-xs">
-                    {cols.map((o) => <option value={o.key} selected={(r.status ?? "baru") === o.key}>{o.label}</option>)}
-                  </select>
-                  <input name="deal_value" type="number" min="0" placeholder="Nilai deal Rp" value={r.dealValue ?? ""} class="w-full !py-1 text-xs" />
+                  <div class="flex gap-1">
+                    {cols.map((o) => (
+                      <button name="status" value={o.key} type="submit" title={o.label}
+                        class:list={["flex-1 rounded-md px-1 py-1 text-[10px] font-bold",
+                          (r.status ?? "baru") === o.key ? "bg-[color:var(--brand)] text-white" : "bg-[color:var(--bg-surface-2)] text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"]}>
+                        {o.key === "baru" ? "Baru" : o.key === "dibalas" ? "Balas" : o.key === "deal" ? "Deal" : "Batal"}
+                      </button>
+                    ))}
+                  </div>
+                  <input name="deal_value" type="number" min="0" placeholder={`Nilai deal Rp (est. ${fmtRpShort(r.sc.estValue)})`} value={r.dealValue ?? ""} class="w-full !py-1 text-xs" />
                   <input name="note" type="text" maxlength="500" placeholder="Catatan…" value={r.note ?? ""} class="w-full !py-1 text-xs" />
-                  <button class="btn mt-1 w-full justify-center !py-1 text-xs" type="submit">Simpan</button>
                 </form>
               </details>
             );
           })}
-          {byStatus(c.key).length === 0 && <div class="px-1.5 py-3 text-center text-[11px] text-[color:var(--text-faint)]">Kosong</div>}
+          {byStatusScored(c.key).length === 0 && <div class="px-1.5 py-3 text-center text-[11px] text-[color:var(--text-faint)]">Kosong</div>}
         </div>
       </div>
     ))}
