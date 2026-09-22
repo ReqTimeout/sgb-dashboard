@@ -2,7 +2,7 @@
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestMetric, series, sumRange } from "../lib/data";
-import { delta, fmtInt, fmtNum, greet, insightClicks } from "../lib/insights";
+import { delta, fmtInt, fmtNum, fmtRp, greet } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import { leadEvents } from "../../drizzle/schema";
@@ -13,10 +13,11 @@ if (!tenant) throw new Error("Tenant tidak ditemukan");
 
 const clicks = await series(tenant.id, "seo", "clicks", 30);
 const impr = await series(tenant.id, "seo", "impressions", 30);
-// GSC delay ~2 hari → 7 hari terakhir yang ada datanya = H-8..H-2
 const sum7 = sumRange(clicks, 8, 2);
 const prev7 = sumRange(clicks, 15, 9);
 const imp7 = sumRange(impr, 8, 2);
+const sum30 = sumRange(clicks, 30, 0);
+const imp30 = sumRange(impr, 30, 0);
 const d = delta(sum7, prev7);
 const pub = await latestMetric(tenant.id, "content", "articles_published_total");
 const leads = await latestMetric(tenant.id, "wa", "leads");
@@ -24,7 +25,6 @@ const hasData = clicks.length > 0;
 const sparkClicks = clicks.slice(-14).map((p) => p.value);
 const sparkImpr = impr.slice(-14).map((p) => p.value);
 
-// Lead per hari 14 hari terakhir (untuk sparkline)
 const db = getDb();
 const since14 = new Date();
 since14.setUTCDate(since14.getUTCDate() - 14);
@@ -41,25 +41,82 @@ for (let i = 13; i >= 0; i--) {
   dt.setUTCDate(dt.getUTCDate() - i);
   sparkLeads.push(leadMap.get(dt.toISOString().slice(0, 10)) ?? 0);
 }
+
+// Savings: kalau organik menghasilkan X klik, dan CPC Meta ~Rp1.000,
+// berarti Anda "hemat" Rp Xjt yang tidak perlu dibayar ke Meta bulan ini.
+const organicClickValue = sum7 * 1000; // estimasi nilai SEO vs paid Meta
+const trend7 = d.pct ?? 0;
+const headline = hasData
+  ? `${fmtInt(sum7)} klik Google 7 hari terakhir — ${trend7 > 0 ? `naik ${Math.abs(trend7).toFixed(0)}%` : trend7 < 0 ? `turun ${Math.abs(trend7).toFixed(0)}%` : "stabil"} vs minggu lalu.`
+  : `Belum ada data GSC untuk 7 hari terakhir.`;
 ---
 <Base title="Pagi ini" tenantName={tenant.name}>
-  <div class="card px-5 py-4">
-    <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Ringkasan</div>
-    <div class="mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-tight sm:text-3xl">
-      {greet()}, {user.role === "superadmin" ? "Bos" : user.name} 👋
+  <!-- HERO WOW -->
+  <div class="relative overflow-hidden rounded-2xl px-6 py-7 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full" style="background: radial-gradient(circle, rgb(37 211 102 / 0.20), transparent 70%)"></div>
+    <div class="pointer-events-none absolute -top-24 -left-24 h-64 w-64 rounded-full" style="background: radial-gradient(circle, rgb(220 38 38 / 0.20), transparent 70%)"></div>
+    <div class="relative z-10 grid gap-5 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">{greet()}, {user.role === "superadmin" ? "Pak Bos" : "Ibu"} 👋</div>
+        <div class="mt-2 text-display text-3xl sm:text-5xl">{tenant.name}</div>
+        <p class="mt-3 max-w-xl text-base text-white/85">{headline}</p>
+      </div>
+      <div class="grid gap-2 sm:gap-3">
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Hemat dari organik 7 hari</div>
+          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold text-[#34d399]">{fmtRp(organicClickValue)}</div>
+          <div class="text-[10px] text-white/55">≈ setara biaya Meta untuk klik yg sama</div>
+        </div>
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Tayang 7 hari</div>
+          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtNum(imp7)}</div>
+          <div class="text-[10px] text-white/55">kali muncul di Google</div>
+        </div>
+      </div>
     </div>
-    <p class="mt-1 text-sm text-[color:var(--text-muted)]">
-      {tenant.name} · {hasData ? insightClicks(sum7, prev7, tenant.name) : "Menunggu data GSC pertama (push harian 05:00 WIB)."}
-    </p>
   </div>
 
+  <!-- WOW 4 KARTU -->
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
     <StatCard label="Klik Google /7 hari" value={fmtInt(sum7)} delta={d.pct ?? undefined} spark={sparkClicks} />
-    <StatCard label="Tayang /7 hari" value={fmtNum(imp7)} hint="kali toko tampil di hasil pencarian" spark={sparkImpr} />
-    <StatCard label="Artikel terbit" value={pub ? fmtInt(pub.value) : "—"} hint="total di mesin konten" />
+    <StatCard label="Tayang /7 hari" value={fmtNum(imp7)} hint="kali muncul di hasil pencarian" spark={sparkImpr} />
+    <StatCard label="Artikel terbit" value={pub ? fmtInt(pub.value) : "—"} hint={`${fmtInt(pub?.value ?? 0)} artikel live di Google`} />
     <StatCard label="Lead WA /14 hari" value={leads ? fmtInt(leads.value) : "—"} hint="klik WhatsApp dari web" spark={sparkLeads} />
   </div>
 
+  <!-- INSIGHT NARATIF (3 kalimat human) -->
+  <div class="card mt-4 p-5">
+    <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Insight minggu ini</div>
+    <div class="mt-2 grid gap-3 sm:grid-cols-3 text-sm leading-relaxed">
+      <p class="rounded-lg bg-[color:var(--bg-surface-2)]/60 p-3">
+        <strong class="text-[color:var(--text-primary)]">SEO mesin Anda jalan.</strong>{" "}
+        <span class="text-[color:var(--text-secondary)]">
+          {sum30 > 0
+            ? `${fmtInt(sum30)} klik masuk dari Google 30 hari terakhir. Kalau pakai iklan, ini setara sekitar ${fmtRp(sum30 * 1500)} budget.`
+            : "Belum ada klik 30 hari — biasanya perlu 1-2 minggu setelah push GSC pertama."}
+        </span>
+      </p>
+      <p class="rounded-lg bg-[color:var(--bg-surface-2)]/60 p-3">
+        <strong class="text-[color:var(--text-primary)]">Mesin konten tidak diam.</strong>{" "}
+        <span class="text-[color:var(--text-secondary)]">
+          {pub?.value
+            ? `Sudah ${fmtInt(pub.value)} artikel live. Tiap artikel baru dapat giliran muncul di Google minggu ini.`
+            : "Belum ada artikel yang diterbitkan."}
+        </span>
+      </p>
+      <p class="rounded-lg bg-[color:var(--bg-surface-2)]/60 p-3">
+        <strong class="text-[color:var(--text-primary)]">Lead WA jalan terus.</strong>{" "}
+        <span class="text-[color:var(--text-secondary)]">
+          {leads?.value
+            ? `${fmtInt(leads.value)} klik WA masuk 14 hari terakhir. Tertinggi biasanya Senin-Sabtu malam.`
+            : "Belum ada lead WA — halaman ini terisi otomatis dari klik tombol WhatsApp di situs."}
+        </span>
+      </p>
+    </div>
+  </div>
+
+  <!-- DEEP LINK NAVIGATION -->
   <div class="mt-4 grid gap-3 sm:grid-cols-3">
     <a href="/seo" class="card p-4"><span class="text-lg">📈</span> <strong class="font-[family-name:var(--font-heading)] text-sm">Performa SEO</strong><br /><span class="text-xs text-[color:var(--text-muted)]">Grafik 90 hari + query & halaman top</span></a>
     <a href="/ranking" class="card p-4"><span class="text-lg">🎯</span> <strong class="font-[family-name:var(--font-heading)] text-sm">Ranking Tracker</strong><br /><span class="text-xs text-[color:var(--text-muted)]">Posisi keyword hari ini + movers</span></a>

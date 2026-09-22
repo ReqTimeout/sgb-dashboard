@@ -5,7 +5,33 @@ import { getDb } from "../../../lib/db";
 import { leadEvents } from "../../../../drizzle/schema";
 import { getRequestTenant } from "../../../lib/data";
 
-// Update status/deal lead pipeline. Auth: session login + tenant match.
+const META_PIXEL_ID = process.env.META_PIXEL_ID ?? "";
+const META_SYS_TOKEN = process.env.META_SYS_TOKEN ?? "";
+const META_API = "https://graph.facebook.com/v26.0";
+
+async function sendMetaOfflinePurchase(p: { dealValue: number; phoneHash: string | null; pageUrl: string | null; leadEventId: string | null; ip: string; ua: string }) {
+  if (!META_PIXEL_ID || !META_SYS_TOKEN) return { skipped: true };
+  const event = {
+    event_name: "Purchase",
+    event_id: `oc_${p.leadEventId ?? "x"}_${Date.now()}`.slice(0, 64),
+    event_time: Math.floor(Date.now() / 1000),
+    event_source_url: (p.pageUrl ?? "").slice(0, 512),
+    action_source: "other",
+    user_data: {
+      ...(p.phoneHash ? { ph: [p.phoneHash] } : {}),
+      ...(p.ip && p.ip !== "?" ? { client_ip_address: p.ip.slice(0, 64) } : {}),
+      client_user_agent: p.ua.slice(0, 256),
+    },
+    custom_data: { currency: "IDR", value: p.dealValue, content_type: "product" },
+  };
+  const r = await fetch(`${META_API}/${META_PIXEL_ID}/events?access_token=${META_SYS_TOKEN}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: [event] }),
+  });
+  return { http: r.status };
+}
+
 const Body = z.object({
   id: z.coerce.number().int().positive(),
   status: z.enum(["baru", "dibalas", "deal", "batal"]),
@@ -36,15 +62,33 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
       .where(and(eq(leadEvents.id, parsed.data.id), tenant ? eq(leadEvents.tenantId, tenant.id) : eq(leadEvents.tenantId, -1)))
       .limit(1);
     if (!rows[0]) return new Response("Lead tidak ditemukan", { status: 404 });
+    const was = rows[0];
+    const newStatus = parsed.data.status;
+    const dealValue = parsed.data.deal_value ?? (newStatus === "deal" ? was.dealValue : null);
     await db
       .update(leadEvents)
       .set({
-        status: parsed.data.status,
-        dealValue: parsed.data.deal_value ?? (parsed.data.status === "deal" ? rows[0].dealValue : null),
-        note: parsed.data.note ?? rows[0].note,
+        status: newStatus,
+        dealValue,
+        note: parsed.data.note ?? was.note,
         updatedAt: new Date(),
       })
       .where(eq(leadEvents.id, parsed.data.id));
+
+    // D2.3 Offline conversion loop — kirim Meta CAPI Purchase kalau lead di-deal.
+    // Ini melatih Meta belajar "lead mana yang berkualitas", bukan cuma yang klik.
+    if (newStatus === "deal" && dealValue && dealValue > 0) {
+      const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "?";
+      const ua = request.headers.get("user-agent") ?? "";
+      sendMetaOfflinePurchase({
+        dealValue,
+        phoneHash: was.phoneHash ?? null,
+        pageUrl: was.pageUrl ?? null,
+        leadEventId: was.eventId ?? String(was.id),
+        ip,
+        ua,
+      }).catch((e) => console.error("[pipeline] meta OC:", String(e).slice(0, 200)));
+    }
   } catch (e) {
     console.error("[pipeline]", e);
     return new Response("Gagal menyimpan", { status: 500 });

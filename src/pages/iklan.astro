@@ -2,53 +2,205 @@
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import Chart from "../components/Chart.svelte";
-import { getRequestTenant, latestMetric, series, sumRange } from "../lib/data";
-import { fmtInt, fmtNum, fmtRp } from "../lib/insights";
+import { getRequestTenant, series, sumRange } from "../lib/data";
+import { fmtInt, fmtRp } from "../lib/insights";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 
-async function ch(channel: string) {
-  const spend = await series(tenant!.id, channel, "spend", 30);
-  const clicks = await series(tenant!.id, channel, "clicks", 30);
-  const leads = await series(tenant!.id, channel, channel === "google_ads" ? "conversions" : "leads", 30);
-  const s = sumRange(spend, 30, 0), c = sumRange(clicks, 30, 0), l = sumRange(leads, 30, 0);
-  return { spend: s, clicks: Math.round(c), leads: Math.round(l), series: spend };
-}
-const meta = await ch("meta_ads");
-const google = await ch("google_ads");
-const hasAny = meta.spend + google.spend + meta.clicks + google.clicks > 0;
+// meta_ads channel = ACTIVE only (sesuai revisi meta-insights producer)
+const spend = await series(tenant.id, "meta_ads", "spend", 30);
+const clicks = await series(tenant.id, "meta_ads", "clicks", 30);
+const chatStarted = await series(tenant.id, "meta_ads", "leads", 30);
+const chatReplied = await series(tenant.id, "meta_ads", "chat_replied", 30);
+const google = await series(tenant.id, "google_ads", "spend", 30);
+// SEO organic data untuk perbandingan
+const organicClicks = await series(tenant.id, "seo", "clicks", 30);
 
-function cpa(spend: number, leads: number): string {
-  if (!leads) return "—";
-  return "Rp" + fmtInt(spend / leads);
-}
-const dates = meta.series.length ? meta.series.map((p) => p.date.slice(5)) : google.series.map((p) => p.date.slice(5));
+const mSpend = sumRange(spend, 30, 0);
+const mClicks = sumRange(clicks, 30, 0);
+const mChats = sumRange(chatStarted, 30, 0);
+const mReplied = sumRange(chatReplied, 30, 0);
+const gSpend = sumRange(google, 30, 0);
+const oClicks = sumRange(organicClicks, 30, 0);
+
+const cpaChat = mChats > 0 ? Math.round(mSpend / mChats) : 0;
+const cpaReply = mReplied > 0 ? Math.round(mSpend / mReplied) : 0;
+const cpc = mClicks > 0 ? Math.round(mSpend / mClicks) : 0;
+
+// Audit panel: fetch dari admin endpoint /api/audit/meta (token via env)
+let campaigns: { id: string; name: string; spend: number; clicks: number; chat_started: number; chat_replied: number; leads: number }[] = [];
+let summary: { active?: number; paused?: number; fetched_at?: string | null } = {};
+let auditError: string | null = null;
+try {
+  const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
+  const adminToken = process.env.SGB_INGEST_KEY ?? "";
+  const r = await fetch(`${adminUrl}/api/audit/meta?token=${encodeURIComponent(adminToken)}`);
+  if (r.ok) {
+    const j = await r.json();
+    summary = { active: j.active, paused: j.paused, fetched_at: j.fetched_at };
+    campaigns = Array.isArray(j.campaigns) ? j.campaigns : [];
+  } else {
+    auditError = `admin HTTP ${r.status}`;
+  }
+} catch (e) { auditError = String(e); }
+
+const dates = spend.map((p) => p.date.slice(5));
+const hasAny = mSpend + mChats + mClicks > 0 || gSpend > 0;
+
 const option = {
   tooltip: { trigger: "axis" },
-  legend: { data: ["Meta spend", "Google spend"], top: 0 },
-  grid: { left: 48, right: 12, top: 36, bottom: 28 },
-  xAxis: { type: "category", data: dates, axisLabel: { hideOverlap: true } },
-  yAxis: { type: "value", name: "Rp" },
+  legend: { data: ["Meta spend (AKTIF)", "Chat WA masuk"], top: 0, textStyle: { fontSize: 10 } },
+  grid: { left: 56, right: 48, top: 36, bottom: 28 },
+  xAxis: { type: "category", data: dates, axisLabel: { hideOverlap: true, fontSize: 10 } },
+  yAxis: [
+    { type: "value", name: "Rp", position: "left", axisLabel: { fontSize: 10 } },
+    { type: "value", name: "Chat", position: "right", axisLabel: { fontSize: 10 } },
+  ],
   series: [
-    { name: "Meta spend", type: "bar", data: meta.series.map((p) => p.value), itemStyle: { color: "#0081fb" } },
-    { name: "Google spend", type: "bar", data: google.series.map((p) => p.value), itemStyle: { color: "#fabb05" } },
+    { name: "Meta spend (AKTIF)", type: "bar", data: spend.map((p) => p.value), itemStyle: { color: "#0081fb" } },
+    { name: "Chat WA masuk", type: "line", yAxisIndex: 1, smooth: true, data: chatStarted.map((p) => p.value), itemStyle: { color: "#25D366" }, areaStyle: { opacity: 0.08 } },
   ],
 };
 ---
 <Base title="Iklan" tenantName={tenant.name}>
-  <p class="text-sm text-[color:var(--text-muted)]">{tenant.name} · spend & hasil per channel, 30 hari. Data read-only dari API resmi.</p>
+  <div class="relative overflow-hidden rounded-2xl px-6 py-7 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="pointer-events-none absolute -bottom-20 -right-20 h-72 w-72 rounded-full" style="background: radial-gradient(circle, rgb(37 211 102 / 0.25), transparent 70%)"></div>
+    <div class="relative z-10 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#34d399]">Performa Iklan — campaign AKTIF saja</div>
+        <div class="mt-1 text-display text-3xl sm:text-4xl">
+          {mChats > 0 ? `${fmtRp(cpaChat)}` : "Belum ada"}
+          <span class="text-xl font-bold text-white/60">{mChats > 0 ? " /chat WA" : ""}</span>
+        </div>
+        <p class="mt-2 max-w-xl text-sm text-white/85">
+          {mChats > 0
+            ? `${fmtInt(mChats)} chat WA masuk dari ${fmtInt(mClicks)} klik, 30 hari terakhir. CPA per chat di benchmark Rp2-15rb untuk CTWA.`
+            : "Belum ada data 30 hari terakhir. Lead Pertama muncul setelah campaign AKTIF jalan minimal 1-2 hari."}
+        </p>
+      </div>
+      <div class="grid gap-2 sm:gap-3">
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Spend 30h AKTIF</div>
+          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtRp(mSpend)}</div>
+        </div>
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Chat WA masuk</div>
+          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold text-[#34d399]">{fmtInt(mChats)}</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Total spend 30 hari" value={fmtRp(meta.spend + google.spend)} spark={meta.series.slice(-14).map((p) => p.value)} />
-    <StatCard label="Meta" value={fmtRp(meta.spend)} hint={`${fmtInt(meta.leads)} lead · CPA ${cpa(meta.spend, meta.leads)}`} warn={meta.leads > 0 && meta.spend / meta.leads > 500000} />
-    <StatCard label="Google" value={fmtRp(google.spend)} hint={`${fmtInt(google.leads)} konv · CPA ${cpa(google.spend, google.leads)}`} />
-    <StatCard label="Klik iklan 30 hari" value={fmtInt(meta.clicks + google.clicks)} />
+    <StatCard label="Spend 30 hari (AKTIF)" value={fmtRp(mSpend)} hint="campaign berjalan saja" spark={spend.slice(-14).map((p) => p.value)} />
+    <StatCard label="Chat WA masuk" value={fmtInt(mChats)} hint="mulai percakapan" spark={chatStarted.slice(-14).map((p) => p.value)} />
+    <StatCard label="Chat dibalas" value={fmtInt(mReplied)} hint="customer benar-benar bales" />
+    <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"}`} />
   </div>
 
-  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-heading font-bold">Spend harian</h2>
-    {hasAny ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-slate-400">Belum ada spend — campaign P9 belum jalan. Producer sudah siap, data mengalir otomatis saat ada spend.</p>}
+  <!-- PERBANDINGAN ORGANIK VS IKLAN -->
+  {oClicks > 0 && mSpend > 0 && (
+    <div class="card mt-4 p-5">
+      <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Perbandingan 30 hari</div>
+      <div class="mt-3 grid gap-3 sm:grid-cols-2">
+        <div class="rounded-lg border border-[color:var(--success)]/30 bg-[color:var(--success-soft)] p-4">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--success)]">Organik (SEO)</div>
+          <div class="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtInt(oClicks)} klik</div>
+          <div class="mt-1 text-xs text-[color:var(--text-muted)]">Biaya: <strong>Rp0</strong> · CPC: <strong>Rp0</strong></div>
+          <div class="mt-1 text-xs text-[color:var(--text-success)]">Seandainya beli klik sebanyak ini via Meta: {fmtRp(oClicks * 1500)}</div>
+        </div>
+        <div class="rounded-lg border border-[color:var(--brand)]/30 bg-[color:var(--brand-soft)] p-4">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--brand)]">Berbayar (Meta)</div>
+          <div class="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtInt(mClicks)} klik</div>
+          <div class="mt-1 text-xs text-[color:var(--text-muted)]">Biaya: <strong>{fmtRp(mSpend)}</strong> · CPC: <strong>{fmtRp(cpc)}</strong></div>
+          <div class="mt-1 text-xs text-[color:var(--brand)]">CPA per chat: {mChats ? fmtRp(cpaChat) : "—"}</div>
+        </div>
+      </div>
+      <p class="mt-3 text-sm text-[color:var(--text-secondary)]">
+        <strong>Bos:</strong> mesin SEO Anda menghasilkan {fmtInt(oClicks)} klik gratis bulan ini. Berharga {fmtRp(oClicks * 1500)} kalau harus bayar. SEO + iklan saling melengkapi: SEO untuk jangka panjang, iklan untuk chat cepat.
+      </p>
+    </div>
+  )}
+
+  <div class="card mt-4 p-5">
+    <div class="flex items-center justify-between">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Spend harian vs chat WA <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">30 hari · ACTIVE</span></h2>
+      <span class="chip text-[10px]">{fmtInt(mClicks)} klik · CPC {fmtRp(cpc)}</span>
+    </div>
+    <div class="mt-3">
+      {hasAny ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — campaign P9 belum jalan. Producer sudah siap.</p>}
+    </div>
   </div>
+
+  <!-- AUDIT PANEL: read-only per-campaign breakdown -->
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <div>
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🔍 Audit Meta Ads <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">read-only · snapshot cron 05:30 WIB</span></h2>
+        <p class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">Hanya campaign <strong class="text-[color:var(--success)]">AKTIF</strong>. {summary.active != null ? `${summary.active} AKTIF, ${summary.paused ?? 0} PAUSED disembunyikan.` : "Menunggu cron berikutnya."}</p>
+      </div>
+      <span class="chip chip-warning text-[10px]">Tidak ada perubahan dilakukan</span>
+    </div>
+    {campaigns.length === 0 ? (
+      <div class="px-5 py-10 text-center">
+        <div class="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-[color:var(--warning-soft)] text-[color:var(--warning)]">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <h3 class="font-[family-name:var(--font-heading)] text-sm font-bold">Audit panel belum terisi</h3>
+        <p class="mt-1 text-xs text-[color:var(--text-muted)]">
+          {auditError
+            ? `Audit endpoint belum hidup di admin. Setelah admin redeploy (biasanya 5-10 menit setelah push), panel ini otomatis terisi breakdown per campaign AKTIF.`
+            : `Belum ada audit terbaru. Cron meta-insights akan jalan lagi 05:30 WIB — panel ini terisi otomatis setiap hari dengan CPA per chat, CPC, dan chat dibalas.`}
+        </p>
+        <div class="mt-3 inline-flex items-center gap-2 rounded-lg bg-[color:var(--bg-surface-2)] px-3 py-1.5 text-[11px] text-[color:var(--text-faint)]">
+          <span class="pulse-dot"></span>
+          Pending: cron meta-insights berikutnya di 05:30 WIB
+        </div>
+      </div>
+    ) : (
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[720px] text-sm">
+          <thead class="bg-[color:var(--bg-surface-2)]/60 text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+            <tr><th class="px-5 py-2.5">Campaign</th><th class="px-2 py-2.5 text-right">Spend</th><th class="px-2 py-2.5 text-right">Klik</th><th class="px-2 py-2.5 text-right">Chat mulai</th><th class="px-2 py-2.5 text-right">Dibalas</th><th class="px-2 py-2.5 text-right">CPA /chat</th><th class="px-2 py-2.5 text-right">CPC</th><th class="px-5 py-2.5 text-right">Rekomendasi</th></tr>
+          </thead>
+          <tbody>
+            {campaigns.map((c) => {
+              const cpa = c.chat_started > 0 ? Math.round(c.spend / c.chat_started) : 0;
+              const replyRate = c.chat_started > 0 ? Math.round((c.chat_replied / c.chat_started) * 100) : 0;
+              const cpcC = c.clicks > 0 ? Math.round(c.spend / c.clicks) : 0;
+              const rec = cpa === 0 ? { cls: "chip", label: "Belum ada chat" }
+                : cpa < 8000 ? { cls: "chip chip-success", label: "Sehat" }
+                : cpa < 15000 ? { cls: "chip chip-warning", label: "Pantau" }
+                : { cls: "chip chip-danger", label: "Mahal — review" };
+              return (
+                <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+                  <td class="px-5 py-3 font-medium">{c.name}</td>
+                  <td class="px-2 py-3 text-right font-[family-name:var(--font-mono-num)] font-semibold">{fmtRp(c.spend)}</td>
+                  <td class="px-2 py-3 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(c.clicks)}</td>
+                  <td class="px-2 py-3 text-right font-[family-name:var(--font-mono-num)] font-bold text-[color:var(--success)]">{fmtInt(c.chat_started)}</td>
+                  <td class="px-2 py-3 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(c.chat_replied)} <span class="text-[10px] text-[color:var(--text-faint)]">({replyRate}%)</span></td>
+                  <td class="px-2 py-3 text-right font-[family-name:var(--font-mono-num)] font-semibold">{cpa ? fmtRp(cpa) : "—"}</td>
+                  <td class="px-2 py-3 text-right font-[family-name:var(--font-mono-num)]">{cpcC ? fmtRp(cpcC) : "—"}</td>
+                  <td class="px-5 py-3 text-right"><span class:list={[rec.cls, "text-[10px]"]}>{rec.label}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+    <div class="border-t border-[color:var(--border-subtle)] px-5 py-3 text-[11px] text-[color:var(--text-faint)]">
+      💡 <strong class="text-[color:var(--text-secondary)]">Benchmark CTWA Indonesia:</strong> CPA per chat Rp2-15rb (sehat), Rp15-30rb (pantau), &gt;Rp30rb (mahal). Lihat IMPROVEMENT.md §D2 untuk konteks.
+    </div>
+  </div>
+
+  {gSpend > 0 && (
+    <div class="card mt-4 p-5">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Google Ads <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">{fmtRp(gSpend)} spend 30h</span></h2>
+      <p class="mt-2 text-sm text-[color:var(--text-muted)]">Aktif sejak P9 dijalankan. Konversi via GA4 import sudah live.</p>
+    </div>
+  )}
 </Base>

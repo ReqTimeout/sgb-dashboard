@@ -3,7 +3,7 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import Chart from "../components/Chart.svelte";
 import { getRequestTenant, latestRanks, series, sumRange } from "../lib/data";
-import { fmtInt, fmtNum, fmtPct } from "../lib/insights";
+import { fmtInt, fmtNum, fmtPct, fmtRp } from "../lib/insights";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -19,6 +19,29 @@ const totImpr = impr.reduce((a, p) => a + p.value, 0);
 const avgCtr = ctr.length ? ctr.reduce((a, p) => a + p.value, 0) / ctr.length : null;
 const avgPos = pos.length ? pos.reduce((a, p) => a + p.value, 0) / pos.length : null;
 
+// Trend 30 vs 60 hari lalu
+const sum30 = sumRange(clicks, 30, 0);
+const prev30 = sumRange(clicks, 60, 31);
+const trendClicks = prev30 > 0 ? ((sum30 - prev30) / prev30) * 100 : 0;
+const sumImp30 = sumRange(impr, 30, 0);
+const prevImp30 = sumRange(impr, 60, 31);
+const trendImpr = prevImp30 > 0 ? ((sumImp30 - prevImp30) / prevImp30) * 100 : 0;
+
+// Opportunity: query di posisi 4-10 + impressions > 100 → kandidat klik banyak
+const ranks = await latestRanks(tenant.id, 100);
+const queries = ranks.filter((r) => !r.keyword.startsWith("page:"));
+const top10 = queries.filter((r) => r.position != null && r.position > 3 && r.position <= 10 && (r.impressions ?? 0) > 30);
+top10.sort((a, b) => (b.impressions ?? 0) - (a.impressions ?? 0));
+const opportunities = top10.slice(0, 8);
+
+const pages = ranks.filter((r) => r.keyword.startsWith("page:")).slice(0, 10);
+const snapDate = ranks[0]?.date ?? null;
+
+// Hero narrative
+const heroNarative = totClicks > 0
+  ? `${fmtInt(totClicks)} klik masuk dari Google 90 hari — ${trendClicks > 0 ? "naik" : trendClicks < 0 ? "turun" : "stabil"} ${Math.abs(trendClicks).toFixed(0)}% vs 30 hari sebelumnya.${avgPos && avgPos <= 10 ? " Halaman 1 Google — bisnis Anda ditemukan tanpa bayar iklan." : " Belum halaman 1 — ada peluang naik."}`
+  : "Mesin sudah jalan. Data GSC pertama biasanya masuk H+2 setelah push 05:00 WIB.";
+
 const option = {
   tooltip: { trigger: "axis" },
   legend: { data: ["Klik", "Tayang"], top: 0 },
@@ -30,54 +53,114 @@ const option = {
   ],
   series: [
     { name: "Klik", type: "line", smooth: true, data: clicks.map((p) => p.value), itemStyle: { color: "#dc2626" }, areaStyle: { opacity: 0.08 } },
-    { name: "Tayang", type: "bar", yAxisIndex: 1, data: impr.map((p) => p.value), itemStyle: { color: "#e2e8f0" } },
+    { name: "Tayang", type: "bar", yAxisIndex: 1, data: impr.map((p) => p.value), itemStyle: { color: "#cbd5e1" } },
   ],
 };
-
-const ranks = await latestRanks(tenant.id, 50);
-const queries = ranks.filter((r) => !r.keyword.startsWith("page:")).slice(0, 10);
-const pages = ranks.filter((r) => r.keyword.startsWith("page:")).slice(0, 10);
-const snapDate = ranks[0]?.date ?? null;
 ---
 <Base title="Performa SEO" tenantName={tenant.name}>
-  <p class="text-sm text-[color:var(--text-muted)]">
-    {tenant.name} · 90 hari terakhir
-    {snapDate ? ` · data s.d. ${snapDate} (GSC delay ~2 hari)` : " · menunggu push GSC pertama"}
-  </p>
-
-  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Klik 90 hari" value={fmtInt(totClicks)} hint="orang masuk dari Google" spark={clicks.slice(-14).map((p) => p.value)} />
-    <StatCard label="Tayang 90 hari" value={fmtNum(totImpr)} hint="kali tampil di pencarian" spark={impr.slice(-14).map((p) => p.value)} />
-    <StatCard label="CTR rata-rata" value={fmtPct(avgCtr)} hint="klik ÷ tayang" />
-    <StatCard label="Posisi rata-rata" value={avgPos ? avgPos.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1" />
+  <!-- HERO INSIGHT -->
+  <div class="relative overflow-hidden rounded-2xl px-6 py-6 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="relative z-10 grid gap-5 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Performa SEO — {tenant.name}</div>
+        <div class="mt-2 text-display text-2xl sm:text-3xl">{heroNarative}</div>
+        {snapDate && <div class="mt-2 text-[11px] text-white/55">Data per {snapDate} (GSC delay ~2 hari)</div>}
+      </div>
+      <div class="grid gap-2 sm:gap-3">
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Nilai klik organik 90h</div>
+          <div class="font-[family-name:var(--font-display)] text-2xl font-extrabold text-[#34d399]">{fmtRp(totClicks * 1500)}</div>
+          <div class="text-[10px] text-white/55">estimasi budget Meta kalau beli klik sebanyak ini</div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-heading font-bold">Tren harian</h2>
-    {clicks.length > 0 ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-slate-400">Belum ada data — push GSC pertama jalan 05:00 WIB.</p>}
+  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <StatCard label="Klik 90 hari" value={fmtInt(totClicks)} delta={trendClicks} spark={clicks.slice(-14).map((p) => p.value)} />
+    <StatCard label="Tayang 90 hari" value={fmtNum(totImpr)} delta={trendImpr} hint="kali tampil di pencarian" spark={impr.slice(-14).map((p) => p.value)} />
+    <StatCard label="CTR rata-rata" value={fmtPct(avgCtr)} hint="benchmark Indonesia e-commerce 2-4%" />
+    <StatCard label="Posisi rata-rata" value={avgPos ? avgPos.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" />
+  </div>
+
+  <div class="card mt-4 p-5">
+    <div class="flex items-center justify-between">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Tren harian <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">klik merah, tayang abu-abu</span></h2>
+      <span class="chip text-[10px]">{clicks.length} hari data</span>
+    </div>
+    <div class="mt-3">
+      {clicks.length > 0 ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — push GSC pertama jalan 05:00 WIB.</p>}
+    </div>
+  </div>
+
+  <!-- OPPORTUNITY: posisi 4-10 + impressions tinggi -->
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🎯 Peluang cepat <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">keyword halaman 2-3 yang banyak dicari</span></h2>
+      <span class="chip text-[10px]">{opportunities.length} kandidat</span>
+    </div>
+    {opportunities.length === 0 ? (
+      <div class="px-5 py-8 text-center text-sm text-[color:var(--text-faint)]">
+        Belum ada keyword di posisi 4-10. Biasanya muncul setelah artikel di-halaman 1 mulai stabil (~2-3 bulan setelah push).
+      </div>
+    ) : (
+      <table class="w-full text-sm">
+        <thead class="bg-[color:var(--bg-surface-2)]/60 text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+          <tr><th class="px-5 py-2.5">Keyword</th><th class="px-2 py-2.5 text-right">Pos</th><th class="px-2 py-2.5 text-right">Tayang</th><th class="px-2 py-2.5 text-right">Klik</th><th class="px-5 py-2.5">Aksi</th></tr>
+        </thead>
+        <tbody>
+          {opportunities.map((o) => (
+            <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+              <td class="px-5 py-2.5 font-medium">{o.keyword}</td>
+              <td class="px-2 py-2.5 text-right"><span class="chip chip-warning text-[10px]">Hal. {Math.ceil((o.position ?? 0) / 10)} · {o.position?.toFixed(0)}</span></td>
+              <td class="px-2 py-2.5 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(o.impressions)}</td>
+              <td class="px-2 py-2.5 text-right font-[family-name:var(--font-mono-num)] font-semibold">{fmtInt(o.clicks)}</td>
+              <td class="px-5 py-2.5 text-[11px] text-[color:var(--text-muted)]">Tambah FAQ + internal link</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
   </div>
 
   <div class="mt-4 grid gap-4 lg:grid-cols-2">
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <h2 class="font-heading font-bold">Pencarian teratas <span class="font-body text-xs font-normal text-slate-400">yang membawa klik</span></h2>
-      <table class="mt-2 w-full text-sm">
-        <thead><tr class="text-left text-xs text-slate-400"><th class="py-1">Query</th><th class="text-right">Klik</th><th class="text-right">Posisi</th></tr></thead>
+    <div class="card overflow-hidden">
+      <div class="border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Pencarian teratas <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">yang bawa klik</span></h2>
+      </div>
+      <table class="w-full text-sm">
+        <thead class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+          <tr><th class="px-5 py-2">Query</th><th class="px-2 py-2 text-right">Klik</th><th class="px-2 py-2 text-right">Posisi</th></tr>
+        </thead>
         <tbody>
-          {queries.length === 0 && <tr><td colspan="3" class="py-4 text-center text-slate-400">—</td></tr>}
-          {queries.map((q) => (
-            <tr class="border-t border-slate-100"><td class="py-1.5 pr-2">{q.keyword}</td><td class="text-right font-mono-num">{fmtInt(q.clicks)}</td><td class="text-right font-mono-num">{q.position ?? "—"}</td></tr>
+          {queries.slice(0, 10).length === 0 && <tr><td colspan="3" class="px-4 py-6 text-center text-[color:var(--text-faint)]">—</td></tr>}
+          {queries.slice(0, 10).map((q) => (
+            <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+              <td class="px-5 py-2">{q.keyword}</td>
+              <td class="px-2 py-2 text-right font-[family-name:var(--font-mono-num)] font-semibold">{fmtInt(q.clicks)}</td>
+              <td class="px-2 py-2 text-right font-[family-name:var(--font-mono-num)]">{q.position?.toFixed(1) ?? "—"}</td>
+            </tr>
           ))}
         </tbody>
       </table>
     </div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <h2 class="font-heading font-bold">Halaman teratas <span class="font-body text-xs font-normal text-slate-400">paling banyak diklik</span></h2>
-      <table class="mt-2 w-full text-sm">
-        <thead><tr class="text-left text-xs text-slate-400"><th class="py-1">Halaman</th><th class="text-right">Klik</th><th class="text-right">Posisi</th></tr></thead>
+    <div class="card overflow-hidden">
+      <div class="border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Halaman teratas <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">paling banyak diklik</span></h2>
+      </div>
+      <table class="w-full text-sm">
+        <thead class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+          <tr><th class="px-5 py-2">Halaman</th><th class="px-2 py-2 text-right">Klik</th><th class="px-2 py-2 text-right">Pos</th></tr>
+        </thead>
         <tbody>
-          {pages.length === 0 && <tr><td colspan="3" class="py-4 text-center text-slate-400">—</td></tr>}
+          {pages.length === 0 && <tr><td colspan="3" class="px-4 py-6 text-center text-[color:var(--text-faint)]">—</td></tr>}
           {pages.map((p) => (
-            <tr class="border-t border-slate-100"><td class="py-1.5 pr-2 break-all text-xs">{(p.pageUrl ?? "").replace("https://sariglassbangunan.com", "") || "/"}</td><td class="text-right font-mono-num">{fmtInt(p.clicks)}</td><td class="text-right font-mono-num">{p.position ?? "—"}</td></tr>
+            <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+              <td class="px-5 py-2 truncate text-xs">{((p.keyword ?? "").replace("page:", "/").slice(0, 60)) || "/"}</td>
+              <td class="px-2 py-2 text-right font-[family-name:var(--font-mono-num)] font-semibold">{fmtInt(p.clicks)}</td>
+              <td class="px-2 py-2 text-right font-[family-name:var(--font-mono-num)]">{p.position?.toFixed(1) ?? "—"}</td>
+            </tr>
           ))}
         </tbody>
       </table>

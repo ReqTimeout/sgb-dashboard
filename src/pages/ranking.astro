@@ -35,13 +35,25 @@ function badge(pos: number | null): string {
 }
 ---
 <Base title="Ranking Tracker" tenantName={tenant.name}>
-  <p class="text-sm text-[color:var(--text-muted)]">{tenant.name} · {insightPosition(avg)}</p>
+  <div class="relative overflow-hidden rounded-2xl px-6 py-6 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="relative z-10">
+      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Ranking Tracker — {tenant.name}</div>
+      <div class="mt-2 text-display text-2xl sm:text-3xl">
+        {insightPosition(avg)}
+      </div>
+      <p class="mt-2 max-w-xl text-sm text-white/80">
+        {up7 > 0 ? `${up7} keyword naik minggu ini, ${movers.filter((m) => (m.move ?? 0) < 0).length} turun.` : "Belum ada pergerakan signifikan minggu ini."}
+        {" "}{top3 > 0 ? `${top3} di TOP 3 (gold tier).` : ""}
+      </p>
+    </div>
+  </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
     <StatCard label="Rata-rata posisi" value={avg ? avg.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" />
     <StatCard label="TOP 3" value={fmtInt(top3)} hint="gold tier" />
     <StatCard label="TOP 10" value={fmtInt(top10)} hint="page 1" />
-    <StatCard label="Naik 7 hari" value={fmtInt(up7)} hint="movers positif" />
+    <StatCard label="Naik 7 hari" value={fmtInt(up7)} delta={up7 - movers.filter((m) => (m.move ?? 0) < 0).length} hint={up7 > movers.filter((m) => (m.move ?? 0) < 0).length ? "netral ke atas" : "netral ke bawah"} />
   </div>
 
   <div class="mt-4 overflow-x-auto rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--bg-surface)]">
