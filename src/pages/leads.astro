@@ -27,10 +27,10 @@ const rows = await db
 const total = rows.length;
 
 // Kanalisasi sumber → channel (otomatis, tanpa input)
-function toChannel(raw: string | null): string {
-  const s = (raw ?? "").toLowerCase();
+function toChannel(raw: string | null, pageUrl: string | null = null): string {
+  const s = `${raw ?? ""} ${(pageUrl ?? "").toLowerCase()}`;
   if (/meta|facebook|instagram|fb_|ig_/.test(s)) return "Meta Ads";
-  if (/google|gclid|cpc|ads/.test(s)) return "Google Ads";
+  if (/google|gclid|cpc|(?<!promo.*)ads/.test(s)) return "Google Ads";
   if (/promo/.test(s)) return "Promo";
   if (/organik|organic|search|seo/.test(s)) return "Organik";
   if (/referral/.test(s)) return "Referral";
@@ -38,7 +38,7 @@ function toChannel(raw: string | null): string {
 }
 const scored = rows.map((r) => ({
   ...r,
-  channel: toChannel(r.source),
+  channel: toChannel(r.source, r.pageUrl),
   sc: scoreLead({ pageUrl: r.pageUrl, source: r.source, ts: r.ts, status: r.status }),
 }));
 const queue = [...scored]
@@ -92,7 +92,7 @@ const revByCh = new Map<string, number>();
 let revTotal = 0;
 for (const r of rows) {
   if (r.status === "deal" && r.dealValue) {
-    const ch = toChannel(r.source);
+    const ch = toChannel(r.source, r.pageUrl);
     revByCh.set(ch, (revByCh.get(ch) ?? 0) + r.dealValue);
     revTotal += r.dealValue;
   }

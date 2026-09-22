@@ -34,6 +34,17 @@ const cpaReply = mReplied > 0 ? Math.round(mSpend / mReplied) : 0;
 const cpc = mClicks > 0 ? Math.round(mSpend / mClicks) : 0;
 const hasAny = mSpend + mChats + mClicks > 0 || gSpend > 0;
 
+// D6.5: promo aktif dari public promo.json (untuk kartu + lead filter)
+interface PromoLite { slug?: string; label: string; pct: number; priceMin: number; originalPrice: number; endsAt: string; image?: string; theme?: string; }
+let promosActive: PromoLite[] = [];
+try {
+  const r = await fetch("https://sariglassbangunan.com/data/promo.json", { signal: AbortSignal.timeout(8000) });
+  if (r.ok) {
+    const j = await r.json();
+    promosActive = Array.isArray(j.items) ? j.items : [];
+  }
+} catch { promosActive = []; }
+
 // TRACKING HEALTH: gateway + CAPI events + dedupe + GTM live verify
 const tdb = getDb();
 const since7 = new Date();
@@ -144,6 +155,27 @@ try {
     <StatCard label="Chat dibalas" value={fmtInt(mReplied)} hint="customer benar-benar bales" ok={mReplied > 0} />
     <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"}`} warn={mChats > 0 && cpaChat > 15000} ok={mChats > 0 && cpaChat <= 15000} />
   </div>
+
+  {promosActive.length > 0 && (
+    <div class="card mt-4 overflow-hidden">
+      <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🏷️ Promo aktif <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">landing siap diiklankan</span></h2>
+        <span class="chip chip-success text-[10px]">{promosActive.length} live</span>
+      </div>
+      <ul class="divide-y divide-[color:var(--border-subtle)]">
+        {promosActive.slice(0, 6).map((p) => (
+          <li class="flex items-center gap-3 px-5 py-2.5 text-sm">
+            {p.image && <img src={`https://sariglassbangunan.com${p.image}`} alt="" width="40" height="40" loading="lazy" class="h-10 w-10 rounded-lg object-cover" />}
+            <div class="min-w-0 flex-1">
+              <div class="truncate font-semibold">{p.label}</div>
+              <div class="text-[11px] text-[color:var(--text-muted)]">{fmtRp(p.originalPrice)} → <strong class="text-[color:var(--danger)]">{fmtRp(p.priceMin)}</strong> (−{p.pct}%) · s/d {p.endsAt.slice(0, 10)}</div>
+            </div>
+            <a href={`https://sariglassbangunan.com/promo/${p.slug}/`} target="_blank" rel="noopener" class="btn shrink-0 !py-1 text-xs">Landing ↗</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )}
 
   {oClicks > 0 && mSpend > 0 && (
     <div class="card mt-4 p-5">
