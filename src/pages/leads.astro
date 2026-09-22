@@ -1,9 +1,10 @@
 ---
 import Base from "../layouts/Base.astro";
+import StatCard from "../components/StatCard.astro";
 import Chart from "../components/Chart.svelte";
 import { getRequestTenant } from "../lib/data";
-import { fmtInt } from "../lib/insights";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { fmtInt, fmtRp } from "../lib/insights";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import { leadEvents } from "../../drizzle/schema";
 
@@ -13,42 +14,58 @@ if (!tenant) throw new Error("Tenant tidak ditemukan");
 const db = getDb();
 const since = new Date();
 since.setUTCDate(since.getUTCDate() - 30);
-const sinceStr = since.toISOString();
+
+const rows = await db
+  .select()
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, since)))
+  .orderBy(desc(leadEvents.ts))
+  .limit(100);
+const total = rows.length;
 
 // Lead per hari
-const perDay = await db
-  .select({ d: sql<string>`DATE(${leadEvents.ts})`, n: sql<number>`COUNT(*)` })
-  .from(leadEvents)
-  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, new Date(sinceStr))))
-  .groupBy(sql`DATE(${leadEvents.ts})`)
-  .orderBy(sql`DATE(${leadEvents.ts})`);
-const total = perDay.reduce((a, r) => a + Number(r.n), 0);
+const dayMap = new Map<string, number>();
+for (const r of rows) dayMap.set(String(r.ts).slice(0, 10), (dayMap.get(String(r.ts).slice(0, 10)) ?? 0) + 1);
+const days: string[] = [];
+for (let i = 29; i >= 0; i--) {
+  const dt = new Date();
+  dt.setUTCDate(dt.getUTCDate() - i);
+  days.push(dt.toISOString().slice(0, 10));
+}
 
-// Halaman sumber
-const byPage = await db
-  .select({ page: leadEvents.pageUrl, n: sql<number>`COUNT(*)` })
-  .from(leadEvents)
-  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, new Date(sinceStr))))
-  .groupBy(leadEvents.pageUrl)
-  .orderBy(sql`COUNT(*) DESC`)
-  .limit(10);
-
-// Jam sibuk (0-23)
-const byHour = await db
-  .select({ h: sql<number>`HOUR(${leadEvents.ts})`, n: sql<number>`COUNT(*)` })
-  .from(leadEvents)
-  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, new Date(sinceStr))))
-  .groupBy(sql`HOUR(${leadEvents.ts})`)
-  .orderBy(sql`HOUR(${leadEvents.ts})`);
-const hours = Array.from({ length: 24 }, (_, h) => Number(byHour.find((r) => Number(r.h) === h)?.n ?? 0));
+// Jam sibuk
+const hours = Array.from({ length: 24 }, () => 0);
+for (const r of rows) hours[new Date(r.ts).getUTCHours()]++;
 const peakHour = hours.indexOf(Math.max(...hours, 0));
+
+// Kanban
+const cols = [
+  { key: "baru", label: "BARU", cls: "chip-info" },
+  { key: "dibalas", label: "DIBALAS", cls: "chip-warning" },
+  { key: "deal", label: "DEAL", cls: "chip-success" },
+  { key: "batal", label: "BATAL", cls: "chip" },
+] as const;
+const byStatus = (s: string) => rows.filter((r) => (r.status ?? "baru") === s);
+const staleMs = Date.now() - 24 * 3600 * 1000;
+const stale = byStatus("baru").filter((r) => new Date(r.ts).getTime() < staleMs);
+
+// Revenue per sumber
+const revBySource = new Map<string, number>();
+let revTotal = 0;
+for (const r of rows) {
+  if (r.status === "deal" && r.dealValue) {
+    const s = r.source ?? "langsung";
+    revBySource.set(s, (revBySource.get(s) ?? 0) + r.dealValue);
+    revTotal += r.dealValue;
+  }
+}
 
 const option = {
   tooltip: { trigger: "axis" },
   grid: { left: 36, right: 12, top: 24, bottom: 28 },
-  xAxis: { type: "category", data: perDay.map((r) => String(r.d).slice(5)), axisLabel: { hideOverlap: true } },
+  xAxis: { type: "category", data: days.map((d) => d.slice(5)), axisLabel: { hideOverlap: true } },
   yAxis: { type: "value" },
-  series: [{ name: "Lead WA", type: "bar", data: perDay.map((r) => Number(r.n)), itemStyle: { color: "#25d366" } }],
+  series: [{ name: "Lead WA", type: "bar", data: days.map((d) => dayMap.get(d) ?? 0), itemStyle: { color: "#25d366" } }],
 };
 const hourOpt = {
   tooltip: { trigger: "axis" },
@@ -58,41 +75,84 @@ const hourOpt = {
   series: [{ name: "Lead", type: "line", smooth: true, data: hours, itemStyle: { color: "#dc2626" }, areaStyle: { opacity: 0.08 } }],
 };
 const shortPage = (u: string | null) => (u ?? "(langsung)").replace("https://sariglassbangunan.com", "") || "/";
+const fmtDate = (ts: unknown) => {
+  const d = new Date(String(ts));
+  return `${d.getUTCDate()}/${d.getUTCMonth() + 1} ${String(d.getUTCHours()).padStart(2, "0")}.${String(d.getUTCMinutes()).padStart(2, "0")}`;
+};
 ---
-<Base title="WA Leads">
-  <p class="mt-1 text-sm text-slate-500">
-    {tenant.name} ·
-    {total > 0
-      ? `${fmtInt(total)} calon pembeli klik WhatsApp 30 hari terakhir${total > 0 ? ` — jam tersibuk ${peakHour}.00` : ""}.`
+<Base title="Pipeline Lead" tenantName={tenant.name}>
+  <p class="text-sm text-[color:var(--text-muted)]">
+    {tenant.name} · {total > 0
+      ? `${fmtInt(total)} lead 30 hari terakhir${total > 0 ? ` — jam tersibuk ${peakHour}.00` : ""}.`
       : "Belum ada lead 30 hari terakhir — data mulai mengalir dari gateway CAPI."}
+    {stale.length > 0 && <span class="chip chip-danger ml-2">⏰ {stale.length} belum dibalas &gt;24 jam</span>}
   </p>
 
-  <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-3xl font-semibold">{fmtInt(total)}</div><div class="mt-1 font-heading text-sm font-bold">Lead 30 hari</div><div class="text-xs text-slate-400">klik WhatsApp dari web</div></div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-3xl font-semibold">{total > 0 ? `${peakHour}.00` : "—"}</div><div class="mt-1 font-heading text-sm font-bold">Jam tersibuk</div><div class="text-xs text-slate-400">waktu terbaik posting/promo</div></div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-mono-num text-3xl font-semibold">{byPage.length > 0 ? fmtInt(Number(byPage[0].n)) : "—"}</div><div class="mt-1 font-heading text-sm font-bold">Lead top halaman</div><div class="text-xs text-slate-400">{byPage.length > 0 ? shortPage(byPage[0].page) : "—"}</div></div>
+  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <StatCard label="Lead 30 hari" value={fmtInt(total)} hint="klik WhatsApp dari web" spark={days.map((d) => dayMap.get(d) ?? 0)} />
+    <StatCard label="Jam tersibuk" value={total > 0 ? `${peakHour}.00` : "—"} hint="waktu terbaik posting/promo" />
+    <StatCard label="Deal tercatat" value={fmtRp(revTotal)} hint={`${byStatus("deal").length} deal · revenue per sumber di bawah`} />
+    <StatCard label="Perlu follow-up" value={String(stale.length)} warn={stale.length > 0} hint="status BARU lebih dari 24 jam" />
   </div>
 
-  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-heading font-bold">Lead per hari</h2>
-    {perDay.length > 0 ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-slate-400">Belum ada data.</p>}
+  <h2 class="mt-6 font-[family-name:var(--font-heading)] text-sm font-bold">Pipeline</h2>
+  <div class="mt-2 grid gap-3 md:grid-cols-4">
+    {cols.map((c) => (
+      <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/60 p-2">
+        <div class="flex items-center justify-between px-1.5 py-1">
+          <span class:list={["chip", c.cls]}>{c.label}</span>
+          <span class="font-[family-name:var(--font-mono-num)] text-xs text-[color:var(--text-faint)]">{byStatus(c.key).length}</span>
+        </div>
+        <div class="space-y-2">
+          {byStatus(c.key).slice(0, 12).map((r) => {
+            const isStale = (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < staleMs;
+            return (
+              <details class="card p-2.5 text-xs">
+                <summary class="cursor-pointer font-semibold leading-snug">
+                  {shortPage(r.pageUrl)}
+                  {isStale && <span title="Belum dibalas >24 jam"> ⏰</span>}
+                </summary>
+                <div class="mt-1 text-[color:var(--text-faint)]">{fmtDate(r.ts)} · {r.source ?? "langsung"}{r.dealValue ? ` · ${fmtRp(r.dealValue)}` : ""}</div>
+                {r.note && <div class="mt-1 rounded bg-[color:var(--bg-surface-2)] px-1.5 py-1 text-[color:var(--text-secondary)]">{r.note}</div>}
+                <form method="post" action="/api/pipeline/update" class="mt-2 space-y-1.5">
+                  <input type="hidden" name="id" value={r.id} />
+                  <select name="status" class="w-full !py-1 text-xs">
+                    {cols.map((o) => <option value={o.key} selected={(r.status ?? "baru") === o.key}>{o.label}</option>)}
+                  </select>
+                  <input name="deal_value" type="number" min="0" placeholder="Nilai deal Rp" value={r.dealValue ?? ""} class="w-full !py-1 text-xs" />
+                  <input name="note" type="text" maxlength="500" placeholder="Catatan…" value={r.note ?? ""} class="w-full !py-1 text-xs" />
+                  <button class="btn mt-1 w-full justify-center !py-1 text-xs" type="submit">Simpan</button>
+                </form>
+              </details>
+            );
+          })}
+          {byStatus(c.key).length === 0 && <div class="px-1.5 py-3 text-center text-[11px] text-[color:var(--text-faint)]">Kosong</div>}
+        </div>
+      </div>
+    ))}
   </div>
 
-  <div class="mt-4 grid gap-4 lg:grid-cols-2">
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <h2 class="font-heading font-bold">Halaman sumber lead <span class="font-body text-xs font-normal text-slate-400">produk peminat tinggi</span></h2>
-      <table class="mt-2 w-full text-sm">
-        <tbody>
-          {byPage.length === 0 && <tr><td class="py-4 text-center text-slate-400">—</td></tr>}
-          {byPage.map((r) => (
-            <tr class="border-t border-slate-100"><td class="py-1.5 pr-2 break-all text-xs">{shortPage(r.page)}</td><td class="py-1.5 text-right font-mono-num font-bold">{fmtInt(Number(r.n))}</td></tr>
-          ))}
-        </tbody>
-      </table>
+  {revBySource.size > 0 && (
+    <div class="card mt-4 p-4">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Revenue per sumber <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">dari deal tercatat</span></h2>
+      <div class="mt-2 grid gap-2 sm:grid-cols-3">
+        {[...revBySource.entries()].map(([s, v]) => (
+          <div class="rounded-lg bg-[color:var(--bg-surface-2)] px-3 py-2">
+            <div class="text-[11px] text-[color:var(--text-muted)]">{s}</div>
+            <div class="font-[family-name:var(--font-mono-num)] text-lg font-bold">{fmtRp(v)}</div>
+          </div>
+        ))}
+      </div>
     </div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <h2 class="font-heading font-bold">Jam sibuk</h2>
-      {total > 0 ? <Chart option={hourOpt} height={220} client:load /> : <p class="py-8 text-center text-sm text-slate-400">Belum ada data.</p>}
-    </div>
+  )}
+
+  <div class="card mt-4 p-4">
+    <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Lead per hari</h2>
+    {total > 0 ? <Chart option={option} client:load /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
+  </div>
+
+  <div class="card mt-4 p-4">
+    <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Jam sibuk</h2>
+    {total > 0 ? <Chart option={hourOpt} height={220} client:load /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
   </div>
 </Base>

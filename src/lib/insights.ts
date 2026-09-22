@@ -10,6 +10,11 @@ export function fmtInt(n: number | null | undefined): string {
   return new Intl.NumberFormat("id-ID").format(Math.round(n));
 }
 
+export function fmtRp(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n) || n === 0) return "Rp0";
+  return "Rp" + new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+}
+
 export function fmtPct(x: number | null | undefined): string {
   if (x == null || Number.isNaN(x)) return "—";
   return `${(x * 100).toFixed(1).replace(".", ",")}%`;

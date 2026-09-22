@@ -1,7 +1,11 @@
 ---
 import Base from "../layouts/Base.astro";
+import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestMetric, series, sumRange } from "../lib/data";
-import { delta, deltaBadge, fmtInt, fmtNum, greet, insightClicks } from "../lib/insights";
+import { delta, fmtInt, fmtNum, greet, insightClicks } from "../lib/insights";
+import { and, eq, gte, sql } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { leadEvents } from "../../drizzle/schema";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -17,9 +21,29 @@ const d = delta(sum7, prev7);
 const pub = await latestMetric(tenant.id, "content", "articles_published_total");
 const leads = await latestMetric(tenant.id, "wa", "leads");
 const hasData = clicks.length > 0;
+const sparkClicks = clicks.slice(-14).map((p) => p.value);
+const sparkImpr = impr.slice(-14).map((p) => p.value);
+
+// Lead per hari 14 hari terakhir (untuk sparkline)
+const db = getDb();
+const since14 = new Date();
+since14.setUTCDate(since14.getUTCDate() - 14);
+const leadDaily = await db
+  .select({ day: sql<string>`DATE(${leadEvents.ts})`, n: sql<number>`COUNT(*)` })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, since14)))
+  .groupBy(sql`DATE(${leadEvents.ts})`)
+  .orderBy(sql`DATE(${leadEvents.ts})`);
+const leadMap = new Map(leadDaily.map((r) => [String(r.day).slice(0, 10), Number(r.n)]));
+const sparkLeads: number[] = [];
+for (let i = 13; i >= 0; i--) {
+  const dt = new Date();
+  dt.setUTCDate(dt.getUTCDate() - i);
+  sparkLeads.push(leadMap.get(dt.toISOString().slice(0, 10)) ?? 0);
+}
 ---
-<Base title="Pagi ini">
-  <div class="rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-5 py-4">
+<Base title="Pagi ini" tenantName={tenant.name}>
+  <div class="card px-5 py-4">
     <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Ringkasan</div>
     <div class="mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-tight sm:text-3xl">
       {greet()}, {user.role === "superadmin" ? "Bos" : user.name} 👋
@@ -29,32 +53,16 @@ const hasData = clicks.length > 0;
     </p>
   </div>
 
-  <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <div class="font-mono-num text-3xl font-semibold">{fmtInt(sum7)}</div>
-      <div class="mt-1 font-heading text-sm font-bold">Klik Google <span class="font-body font-normal text-slate-400">/7 hari</span></div>
-      <div class="mt-1"><Fragment set:html={deltaBadge(d)} /></div>
-    </div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <div class="font-mono-num text-3xl font-semibold">{fmtNum(imp7)}</div>
-      <div class="mt-1 font-heading text-sm font-bold">Tayang <span class="font-body font-normal text-slate-400">/7 hari</span></div>
-      <div class="mt-1 text-xs text-slate-400">kali toko tampil di hasil pencarian</div>
-    </div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <div class="font-mono-num text-3xl font-semibold">{pub ? fmtInt(pub.value) : "—"}</div>
-      <div class="mt-1 font-heading text-sm font-bold">Artikel terbit</div>
-      <div class="mt-1 text-xs text-slate-400">total di mesin konten</div>
-    </div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <div class="font-mono-num text-3xl font-semibold">{leads ? fmtInt(leads.value) : "—"}</div>
-      <div class="mt-1 font-heading text-sm font-bold">Lead WA</div>
-      <div class="mt-1 text-xs text-slate-400">klik WhatsApp dari web</div>
-    </div>
+  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <StatCard label="Klik Google /7 hari" value={fmtInt(sum7)} delta={d.pct ?? undefined} spark={sparkClicks} />
+    <StatCard label="Tayang /7 hari" value={fmtNum(imp7)} hint="kali toko tampil di hasil pencarian" spark={sparkImpr} />
+    <StatCard label="Artikel terbit" value={pub ? fmtInt(pub.value) : "—"} hint="total di mesin konten" />
+    <StatCard label="Lead WA /14 hari" value={leads ? fmtInt(leads.value) : "—"} hint="klik WhatsApp dari web" spark={sparkLeads} />
   </div>
 
   <div class="mt-4 grid gap-3 sm:grid-cols-3">
-    <a href="/seo" class="rounded-2xl border border-slate-200 bg-white p-4 hover:shadow-md">📈 <strong>Performa SEO</strong><br /><span class="text-sm text-slate-500">Grafik 90 hari + query & halaman top</span></a>
-    <a href="/ranking" class="rounded-2xl border border-slate-200 bg-white p-4 hover:shadow-md">🎯 <strong>Ranking Tracker</strong><br /><span class="text-sm text-slate-500">Posisi keyword hari ini + movers</span></a>
-    <a href="/konten" class="rounded-2xl border border-slate-200 bg-white p-4 hover:shadow-md">📝 <strong>Content Pipeline</strong><br /><span class="text-sm text-slate-500">Draft → terbit → terindex</span></a>
+    <a href="/seo" class="card p-4"><span class="text-lg">📈</span> <strong class="font-[family-name:var(--font-heading)] text-sm">Performa SEO</strong><br /><span class="text-xs text-[color:var(--text-muted)]">Grafik 90 hari + query & halaman top</span></a>
+    <a href="/ranking" class="card p-4"><span class="text-lg">🎯</span> <strong class="font-[family-name:var(--font-heading)] text-sm">Ranking Tracker</strong><br /><span class="text-xs text-[color:var(--text-muted)]">Posisi keyword hari ini + movers</span></a>
+    <a href="/konten" class="card p-4"><span class="text-lg">📝</span> <strong class="font-[family-name:var(--font-heading)] text-sm">Content Pipeline</strong><br /><span class="text-xs text-[color:var(--text-muted)]">Draft → terbit → terindex</span></a>
   </div>
 </Base>

@@ -11,6 +11,7 @@
     { group: "SEO", label: "Keyword", href: "/keywords" },
     { group: "Iklan", label: "Performa Iklan", href: "/iklan" },
     { group: "Iklan", label: "ROI", href: "/roi" },
+    { group: "Iklan", label: "Radar Kompetitor", href: "/radar" },
     { group: "Lead", label: "Pipeline", href: "/leads" },
     { group: "Lead", label: "Laporan", href: "/laporan" },
     { group: "Sistem", label: "AI Search", href: "/ai" },

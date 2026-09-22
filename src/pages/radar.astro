@@ -1,0 +1,89 @@
+---
+import Base from "../layouts/Base.astro";
+import EmptyState from "../components/EmptyState.astro";
+import { getRequestTenant } from "../lib/data";
+import { desc, eq } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { competitorAds, competitorWatch } from "../../drizzle/schema";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+const db = getDb();
+const watch = await db.select().from(competitorWatch).where(eq(competitorWatch.tenantId, tenant.id)).orderBy(competitorWatch.pageName);
+const ads = await db.select().from(competitorAds).where(eq(competitorAds.tenantId, tenant.id)).orderBy(desc(competitorAds.fetchedAt)).limit(50);
+const libUrl = (q: string) => `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ID&q=${encodeURIComponent(q)}`;
+---
+<Base title="Competitor Radar" tenantName={tenant.name}>
+  <p class="text-sm text-[color:var(--text-muted)]">
+    {tenant.name} · pantau iklan aktif kompetitor — creative, copy, dan sejak kapan jalan.
+    <span class="chip chip-warning ml-2">API otomatis: menunggu akses Meta (langkah Bos, lihat bawah)</span>
+  </p>
+
+  <div class="mt-4 grid gap-3 lg:grid-cols-3">
+    <div class="card p-4">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Kompetitor dipantau ({watch.length})</h2>
+      <ul class="mt-2 space-y-1.5 text-sm">
+        {watch.map((w) => (
+          <li class="flex items-center justify-between gap-2 rounded-lg bg-[color:var(--bg-surface-2)] px-2.5 py-1.5">
+            <span class="min-w-0">
+              <span class="block truncate font-semibold">{w.pageName}</span>
+              <a class="text-[11px] text-[color:var(--info)] hover:underline" href={libUrl(w.pageName)} target="_blank" rel="noopener">Lihat iklan di Ad Library ↗</a>
+            </span>
+            {user.role === "superadmin" && (
+              <form method="post" action="/api/radar/watch">
+                <input type="hidden" name="action" value="del" />
+                <input type="hidden" name="id" value={w.id} />
+                <button class="rounded px-1.5 py-0.5 text-[11px] text-[color:var(--text-faint)] hover:text-[color:var(--danger)]" title="Hapus">✕</button>
+              </form>
+            )}
+          </li>
+        ))}
+        {watch.length === 0 && <li class="py-2 text-xs text-[color:var(--text-faint)]">Belum ada — tambah di bawah.</li>}
+      </ul>
+      {user.role === "superadmin" && (
+        <form method="post" action="/api/radar/watch" class="mt-3 space-y-2 border-t border-[color:var(--border-subtle)] pt-3">
+          <input type="hidden" name="action" value="add" />
+          <input name="page_name" required maxlength="255" placeholder="Nama Page FB kompetitor…" class="w-full !py-1.5 text-xs" />
+          <input name="page_url" maxlength="512" placeholder="URL Page (opsional)" class="w-full !py-1.5 text-xs" />
+          <button class="btn btn-primary w-full justify-center !py-1.5 text-xs" type="submit">+ Pantau kompetitor</button>
+        </form>
+      )}
+    </div>
+
+    <div class="card p-4 lg:col-span-2">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Iklan terdeteksi ({ads.length})</h2>
+      {ads.length === 0 ? (
+        <div class="mt-3">
+          <EmptyState
+            title="Belum ada data iklan kompetitor"
+            message="Klik link Ad Library di samping untuk cek manual hari ini, atau aktifkan API otomatis (langkah Bos di bawah) agar halaman ini terisi sendiri tiap minggu."
+            mascot="search"
+          />
+        </div>
+      ) : (
+        <ul class="mt-2 space-y-2 text-sm">
+          {ads.map((a) => (
+            <li class="rounded-lg border border-[color:var(--border-subtle)] p-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-semibold">{a.pageName}</span>
+                <span class="chip text-[10px]">{a.source === "api" ? "otomatis" : "manual"}{a.startDate ? ` · sejak ${a.startDate}` : ""}</span>
+              </div>
+              {a.creativeBody && <p class="mt-1 line-clamp-3 text-[color:var(--text-secondary)]">{a.creativeBody}</p>}
+              {a.ctaText && <div class="mt-1 text-[11px] text-[color:var(--text-faint)]">CTA: {a.ctaText}{a.platforms ? ` · ${a.platforms}` : ""}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  </div>
+
+  <div class="card mt-4 p-4 text-sm">
+    <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🔌 Cara aktifkan scan otomatis (langkah Bos, sekali saja)</h2>
+    <ol class="mt-2 list-decimal space-y-1 pl-5 text-[color:var(--text-secondary)]">
+      <li>Buka <a class="text-[color:var(--info)] hover:underline" href="https://www.facebook.com/ads/library/api" target="_blank" rel="noopener">facebook.com/ads/library/api ↗</a> → minta akses Ad Library API untuk aplikasi <strong>Beriklan API</strong>.</li>
+      <li>Setelah disetujui, kabari agent — cron mingguan langsung mengisi tabel ini otomatis.</li>
+      <li>Sementara itu: cek manual via link "Lihat iklan di Ad Library ↗" per kompetitor (tanpa login API, gratis).</li>
+    </ol>
+  </div>
+</Base>

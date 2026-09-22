@@ -70,6 +70,36 @@ export const leadEvents = mysqlTable("lead_events", {
   eventId: varchar("event_id", { length: 64 }),
   phoneHash: varchar("phone_hash", { length: 64 }),
   value: double("value"),
+  status: varchar("status", { length: 16 }).notNull().default("baru"), // baru | dibalas | deal | batal
+  dealValue: int("deal_value"), // nilai rupiah saat deal
+  note: varchar("note", { length: 500 }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const competitorWatch = mysqlTable(
+  "competitor_watch",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: int("tenant_id").notNull(),
+    pageName: varchar("page_name", { length: 255 }).notNull(),
+    pageUrl: varchar("page_url", { length: 512 }),
+    notes: varchar("notes", { length: 500 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_watch").on(t.tenantId, t.pageName)],
+);
+
+export const competitorAds = mysqlTable("competitor_ads", {
+  id: serial("id").primaryKey(),
+  tenantId: int("tenant_id").notNull(),
+  pageName: varchar("page_name", { length: 255 }).notNull(),
+  creativeBody: varchar("creative_body", { length: 2000 }),
+  creativeImageUrl: varchar("creative_image_url", { length: 1024 }),
+  ctaText: varchar("cta_text", { length: 64 }),
+  startDate: varchar("start_date", { length: 16 }),
+  platforms: varchar("platforms", { length: 128 }),
+  source: varchar("source", { length: 16 }).notNull().default("manual"), // manual | api
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
 });
 
 export const rankSnapshots = mysqlTable("rank_snapshots", {
