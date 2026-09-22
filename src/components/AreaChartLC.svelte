@@ -26,7 +26,16 @@
   >
     <Svg>
       <Axis placement="left" grid rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]" />
-      <Axis placement="bottom" rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]" />
+      <Axis
+        placement="bottom"
+        rule
+        class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]"
+        ticks={(scale) => {
+          const dom = scale.domain();
+          const step = Math.max(1, Math.ceil(dom.length / 6));
+          return dom.filter((_, i) => i % step === 0);
+        }}
+      />
       <Area
         line={{ class: "stroke-[color:var(--brand)] stroke-2" }}
         class="fill-[color:var(--brand)] fill-opacity-10"

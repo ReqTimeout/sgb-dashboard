@@ -8,8 +8,9 @@
   interface Props {
     data: BarItem[];
     height?: number;
+    barClass?: string;
   }
-  const { data, height = 220 }: Props = $props();
+  const { data, height = 220, barClass = "fill-[#cbd5e1] dark:fill-[#3a4868]" }: Props = $props();
 </script>
 
 <div style="height: {height}px;">
@@ -24,8 +25,17 @@
   >
     <Svg>
       <Axis placement="left" grid rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]" />
-      <Axis placement="bottom" rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]" />
-      <Bars radius={3} class="fill-[color:var(--brand)]" />
+      <Axis
+        placement="bottom"
+        rule
+        class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]"
+        ticks={(scale) => {
+          const dom = scale.domain();
+          const step = Math.max(1, Math.ceil(dom.length / 8));
+          return dom.filter((_, i) => i % step === 0);
+        }}
+      />
+      <Bars radius={3} class={barClass} />
       <Highlight area />
     </Svg>
     <Tooltip.Root>

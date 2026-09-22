@@ -27,7 +27,16 @@
   >
     <Svg>
       <Axis placement="left" grid rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]" />
-      <Axis placement="bottom" rule class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]" />
+      <Axis
+        placement="bottom"
+        rule
+        class="text-[10px] fill-[color:var(--text-faint)] stroke-[color:var(--border-default)]"
+        ticks={(scale) => {
+          const dom = scale.domain();
+          const step = Math.max(1, Math.ceil(dom.length / 6));
+          return dom.filter((_, i) => i % step === 0);
+        }}
+      />
       <Spline data={rows} x="label" y="value" stroke={color} class="stroke-2" />
       <Highlight points lines />
     </Svg>
