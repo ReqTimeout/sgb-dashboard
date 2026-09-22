@@ -3,12 +3,21 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestMetric } from "../lib/data";
 import { fmtInt } from "../lib/insights";
+import { getDb } from "../lib/db";
+import { aiCitations } from "../../drizzle/schema";
+import { desc, eq } from "drizzle-orm";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 
 const aiRefs = await latestMetric(tenant.id, "ai", "referrals_7d");
+const citations = await getDb()
+  .select()
+  .from(aiCitations)
+  .where(eq(aiCitations.tenantId, tenant.id))
+  .orderBy(desc(aiCitations.checkedAt))
+  .limit(30);
 const llmsTxtUrl = "https://sariglassbangunan.com/llms.txt";
 const robotsUrl = "https://sariglassbangunan.com/robots.txt";
 
@@ -97,14 +106,46 @@ const items = [
 
   <div class="card mt-4 p-5">
     <div class="flex items-center gap-3">
-      <div class="grid h-10 w-10 place-items-center rounded-xl bg-[color:var(--info-soft)] text-[color:var(--info)]">
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[color:var(--info-soft)] text-[color:var(--info)]">
         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       </div>
-      <div>
-        <div class="font-[family-name:var(--font-heading)] text-sm font-bold">Cek sitasi bulanan</div>
-        <p class="mt-0.5 text-xs text-[color:var(--text-muted)]">Agent tanya Perplexity/ChatGPT/Gemini: "toko bahan bangunan majenang" — catat apakah <strong>{tenant.name}</strong> disebut.</p>
+      <div class="flex-1">
+        <div class="font-[family-name:var(--font-heading)] text-sm font-bold">Sitasi di jawaban AI <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">apakah {tenant.name} disebut ChatGPT/Perplexity/Gemini</span></div>
+        <p class="mt-0.5 text-xs text-[color:var(--text-muted)]">Pengecekan manual tiap awal bulan (5 query × 3 mesin). Hasil tercatat di bawah sebagai tren.</p>
       </div>
+      <span class="chip text-[10px]">{citations.length} cek</span>
     </div>
-    <p class="mt-3 text-[11px] text-[color:var(--text-faint)]">Jadwal cek berikutnya: awal bulan depan. Roadmap lengkap ada di <code class="rounded bg-[color:var(--bg-surface-2)] px-1">docs/IMPROVEMENT.md §D5.2</code>.</p>
+    {citations.length === 0 ? (
+      <div class="mt-3 rounded-lg bg-[color:var(--bg-surface-2)]/60 p-4 text-sm text-[color:var(--text-muted)]">
+        Belum ada hasil cek. Cek pertama dijadwalkan awal bulan depan — lima query lokal diuji di tiga mesin AI, hasilnya tampil di sini per mesin.
+      </div>
+    ) : (
+      <div class="mt-3">
+        <div class="grid grid-cols-3 gap-2">
+          {["perplexity", "chatgpt", "gemini"].map((e) => {
+            const rows = citations.filter((c) => c.engine === e);
+            const hit = rows.filter((c) => c.mentioned).length;
+            return (
+              <div class="rounded-lg bg-[color:var(--bg-surface-2)]/60 p-3 text-center">
+                <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">{e}</div>
+                <div class={`mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold ${rows.length && hit === rows.length ? "text-[color:var(--success)]" : hit > 0 ? "text-[color:var(--warning)]" : ""}`}>{rows.length ? `${hit}/${rows.length}` : "—"}</div>
+                <div class="text-[10px] text-[color:var(--text-muted)]">disebut</div>
+              </div>
+            );
+          })}
+        </div>
+        <table class="mt-3 w-full text-sm">
+          <tbody>
+            {citations.slice(0, 10).map((c) => (
+              <tr class="border-t border-[color:var(--border-subtle)]">
+                <td class="py-2 pr-2">{c.query}</td>
+                <td class="py-2 text-[11px] text-[color:var(--text-faint)]">{c.engine}</td>
+                <td class="py-2 text-right">{c.mentioned ? <span class="chip chip-success text-[10px]">disebut{c.position ? ` #${c.position}` : ""}</span> : <span class="chip text-[10px]">tidak</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
   </div>
 </Base>

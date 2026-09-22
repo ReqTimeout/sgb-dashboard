@@ -38,6 +38,22 @@ const opportunities = top10.slice(0, 8);
 const pages = ranks.filter((r) => r.keyword.startsWith("page:")).slice(0, 10);
 const snapDate = ranks[0]?.date ?? null;
 
+// D5.1: status GBP dari cron terakhir (via admin audit)
+let gbp: { connected: boolean; name?: string; total?: number; avg?: number; unanswered?: number; newest?: { stars?: string; by?: string; comment?: string }[] } = { connected: false };
+try {
+  const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
+  const adminToken = process.env.ADMIN_CRON_TOKEN ?? "";
+  const r = await fetch(`${adminUrl}/api/audit/crons?token=${encodeURIComponent(adminToken)}`);
+  if (r.ok) {
+    const j = await r.json();
+    const g = (j.crons ?? []).find((c: { name: string }) => c.name === "gbp-reviews");
+    const s = g?.summary;
+    if (s?.connected) {
+      gbp = { connected: true, name: s.name, total: s.total, avg: s.avg, unanswered: s.unanswered, newest: s.newest ?? [] };
+    }
+  }
+} catch { /* abaikan — tampil sebagai menunggu OAuth */ }
+
 // Hero narrative
 const heroNarative = totClicks > 0
   ? `${fmtInt(totClicks)} klik masuk dari Google 90 hari — ${trendClicks > 0 ? "naik" : trendClicks < 0 ? "turun" : "stabil"} ${Math.abs(trendClicks).toFixed(0)}% vs 30 hari sebelumnya.${avgPos && avgPos <= 10 ? " Halaman 1 Google — bisnis Anda ditemukan tanpa bayar iklan." : " Belum halaman 1 — ada peluang naik."}`
@@ -93,6 +109,41 @@ const heroNarative = totClicks > 0
         <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — push GSC pertama jalan 05:00 WIB.</p>
       )}
     </div>
+  </div>
+
+  <!-- GOOGLE BUSINESS PROFILE (D5.1): review + status koneksi -->
+  <div class="card mt-4 p-5">
+    <div class="flex items-center gap-3">
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[color:var(--success-soft)] text-[color:var(--success)]">
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-4.5-7-11a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 6.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+      </div>
+      <div class="flex-1">
+        <div class="font-[family-name:var(--font-heading)] text-sm font-bold">Google Business Profile <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">ulasan & panggilan lokal</span></div>
+        {gbp.connected ? (
+          <p class="mt-0.5 text-xs text-[color:var(--text-muted)]">
+            <strong class="text-[color:var(--text-primary)]">{gbp.name ?? "Profil terhubung"}</strong> ·
+            rating {gbp.avg ?? "—"} · {gbp.total ?? 0} ulasan
+            {gbp.unanswered ? <span class="chip chip-warning ml-2 text-[10px]">{gbp.unanswered} belum dibalas</span> : <span class="chip chip-success ml-2 text-[10px]">semua dibalas</span>}
+          </p>
+        ) : (
+          <p class="mt-0.5 text-xs text-[color:var(--text-muted)]">
+            Belum terhubung — butuh otorisasi Google sekali (OAuth). Setelah itu ulasan terbaru, rating, dan panggilan lokal tampil di sini otomatis tiap minggu.
+          </p>
+        )}
+      </div>
+      <span class:list={["chip shrink-0 text-[10px]", gbp.connected ? "chip-success" : "chip"]}>{gbp.connected ? "terhubung" : "menunggu OAuth"}</span>
+    </div>
+    {gbp.connected && gbp.newest && gbp.newest.length > 0 && (
+      <ul class="mt-3 space-y-2">
+        {gbp.newest.slice(0, 3).map((r: { stars?: string; by?: string; comment?: string }) => (
+          <li class="rounded-lg bg-[color:var(--bg-surface-2)]/60 px-3 py-2 text-sm">
+            <span class="font-bold">{"★".repeat(Math.min(5, parseInt(String(r.stars ?? "5").replace(/\D/g, "") || "5")))}</span>
+            <span class="text-[color:var(--text-muted)]"> {r.by ?? "Anonim"}</span>
+            <p class="mt-0.5 text-[color:var(--text-secondary)]">{r.comment ?? ""}</p>
+          </li>
+        ))}
+      </ul>
+    )}
   </div>
 
   <!-- OPPORTUNITY: posisi 4-10 + impressions tinggi -->
