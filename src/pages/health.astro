@@ -19,7 +19,7 @@ let liveCrons: { name: string; started_at: string; ok: boolean; error: string | 
 let liveOk = false;
 try {
   const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
-  const adminToken = process.env.SGB_INGEST_KEY ?? "";
+  const adminToken = process.env.ADMIN_CRON_TOKEN ?? "";
   const r = await fetch(`${adminUrl}/api/audit/crons?token=${encodeURIComponent(adminToken)}`);
   if (r.ok) {
     const j = await r.json();

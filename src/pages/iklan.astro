@@ -35,7 +35,7 @@ let summary: { active?: number; paused?: number; fetched_at?: string | null } = 
 let auditError: string | null = null;
 try {
   const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
-  const adminToken = process.env.SGB_INGEST_KEY ?? "";
+  const adminToken = process.env.ADMIN_CRON_TOKEN ?? "";
   const r = await fetch(`${adminUrl}/api/audit/meta?token=${encodeURIComponent(adminToken)}`);
   if (r.ok) {
     const j = await r.json();
