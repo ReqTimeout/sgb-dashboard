@@ -11,6 +11,7 @@ const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 const filter = Astro.url.searchParams.get("status") ?? "";
+const q = (Astro.url.searchParams.get("q") ?? "").trim().toLowerCase();
 
 const db = getDb();
 const rows = await db
@@ -18,8 +19,9 @@ const rows = await db
   .from(keywordInventory)
   .where(eq(keywordInventory.tenantId, tenant.id))
   .orderBy(desc(keywordInventory.priority))
-  .limit(300);
-const list = filter ? rows.filter((r) => r.status === filter) : rows;
+  .limit(1000);
+let list = filter ? rows.filter((r) => r.status === filter) : rows;
+if (q) list = list.filter((r) => r.keyword.toLowerCase().includes(q) || (r.city ?? "").toLowerCase().includes(q));
 
 const counts: Record<string, number> = {};
 for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
@@ -37,11 +39,16 @@ const chip: Record<string, string> = {
     {tenant.name} · {fmtInt(rows.length)} keyword terlacak: mana yang sudah jadi artikel, mana yang belum, progres sampai terindex.
   </p>
 
-  <div class="mt-4 flex flex-wrap gap-2 text-sm">
+  <div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
     <a href="/keywords" class={`rounded-full px-3 py-1 ${!filter ? "bg-brand-600 text-white font-bold" : "bg-slate-100"}`}>Semua ({rows.length})</a>
     {order.map((s) => counts[s] ? (
-      <a href={`/keywords?status=${s}`} class={`rounded-full px-3 py-1 ${filter === s ? "bg-brand-600 text-white font-bold" : "bg-slate-100"}`}>{s} ({counts[s]})</a>
+      <a href={`/keywords?status=${s}${q ? `&q=${encodeURIComponent(q)}` : ""}`} class={`rounded-full px-3 py-1 ${filter === s ? "bg-brand-600 text-white font-bold" : "bg-slate-100"}`}>{s} ({counts[s]})</a>
     ) : null)}
+    <form method="get" action="/keywords" class="ml-auto flex gap-2">
+      {filter && <input type="hidden" name="status" value={filter} />}
+      <input type="search" name="q" value={Astro.url.searchParams.get("q") ?? ""} placeholder="Cari keyword / kota…" class="rounded-full border border-slate-200 px-3 py-1 text-sm" />
+      <button class="rounded-full bg-slate-900 px-3 py-1 text-sm font-bold text-white">Cari</button>
+    </form>
   </div>
 
   {list.length === 0 ? (
@@ -57,12 +64,15 @@ const chip: Record<string, string> = {
   ) : (
   <div class="card mt-4 overflow-x-auto !p-0">
     <table class="w-full min-w-[560px] text-sm">
-      <thead><tr class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]"><th class="px-4 py-2.5">Keyword</th><th class="px-2 py-2.5">Status</th><th class="px-2 py-2.5">Artikel</th><th class="px-4 py-2.5 text-right">Prioritas</th></tr></thead>
+      <thead><tr class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]"><th class="px-4 py-2.5">Keyword</th><th class="px-2 py-2.5">Status</th><th class="px-2 py-2.5">Sumber</th><th class="px-2 py-2.5">Kota</th><th class="px-2 py-2.5">Intent</th><th class="px-2 py-2.5">Artikel</th><th class="px-4 py-2.5 text-right">Prioritas</th></tr></thead>
       <tbody>
         {list.map((r) => (
           <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
             <td class="px-4 py-2 font-medium">{r.keyword}</td>
             <td class="px-2 py-2"><span class={`rounded-full px-2 py-0.5 text-xs font-bold ${chip[r.status] ?? "bg-slate-100 text-slate-600"}`}>{r.status}</span></td>
+            <td class="px-2 py-2 text-xs text-slate-500">{r.source ?? "—"}</td>
+            <td class="px-2 py-2 text-xs text-slate-500">{r.city ?? "—"}</td>
+            <td class="px-2 py-2 text-xs text-slate-500">{r.intent ?? "—"}</td>
             <td class="px-2 py-2 font-mono-num text-xs text-slate-500">{r.articleSlug ?? "—"}</td>
             <td class="px-4 py-2 text-right font-mono-num">{r.priority}</td>
           </tr>

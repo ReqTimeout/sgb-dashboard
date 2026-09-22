@@ -3,6 +3,9 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestMetric, recentArticles } from "../lib/data";
 import { fmtInt } from "../lib/insights";
+import { count, eq } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { keywordInventory } from "../../drizzle/schema";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -13,9 +16,15 @@ const draftTotal = await latestMetric(tenant.id, "content", "articles_draft_tota
 const pub24 = await latestMetric(tenant.id, "content", "articles_published_24h");
 const pending = await latestMetric(tenant.id, "seo", "indexing_pending");
 const list = await recentArticles(tenant.id, 15);
+// Hitung antre LIVE dari inventory (dulu hardcode 79 — menyesatkan).
+let antreCount = 0;
+try {
+  const r = await getDb().select({ n: count() }).from(keywordInventory).where(eq(keywordInventory.tenantId, tenant.id));
+  antreCount = Number(r[0]?.n ?? 0);
+} catch { /* DB belum migrasi → tampilkan — */ }
 
 const stages = [
-  { label: "Antre", value: 79, note: "keyword menunggu draft", tint: "var(--text-faint)" },
+  { label: "Antre", value: antreCount, note: "keyword menunggu draft", tint: "var(--text-faint)" },
   { label: "Draft", value: draftTotal?.value, note: "siap terbit", tint: "var(--warning)" },
   { label: "Terbit 24 jam", value: pub24?.value, note: "artikel baru", tint: "var(--info)" },
   { label: "Total", value: pubTotal?.value, note: "akumulasi", tint: "var(--success)" },

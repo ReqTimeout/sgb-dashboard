@@ -27,6 +27,9 @@ const Keyword = z.object({
   status: z.string().max(32),
   article_slug: z.string().max(255).nullable().optional(),
   priority: z.number().nullable().optional(),
+  source: z.string().max(64).nullable().optional(),
+  city: z.string().max(64).nullable().optional(),
+  intent: z.string().max(32).nullable().optional(),
 });
 const Body = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -61,12 +64,18 @@ export const POST: APIRoute = async ({ request }) => {
             status: k.status,
             articleSlug: k.article_slug ?? null,
             priority: k.priority ?? 50,
+            source: k.source ?? null,
+            city: k.city ?? null,
+            intent: k.intent ?? null,
           })
           .onDuplicateKeyUpdate({
             set: {
               status: k.status,
               articleSlug: k.article_slug ?? null,
               priority: k.priority ?? 50,
+              source: k.source ?? null,
+              city: k.city ?? null,
+              intent: k.intent ?? null,
             },
           });
         kwCount++;
