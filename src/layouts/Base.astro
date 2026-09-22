@@ -16,14 +16,23 @@ const user = Astro.locals.user;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title} · SGB Dashboard</title>
+    <title>{title} · Beriklan Agency</title>
+    <meta name="description" content="Dashboard performa SEO, iklan & lead — Beriklan Agency." />
+    <meta name="theme-color" content="#DC2626" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23DC2626'/%3E%3Cpath d='M10 8h8v3.5h-4.2v2.6H17v3.4h-3.2v2.7H18V24h-8z' fill='white'/%3E%3Crect x='20' y='8' width='2.4' height='16' fill='%23FACC15'/%3E%3C/svg%3E"
+    />
   </head>
   <body class="font-body bg-slate-50 text-slate-900 antialiased">
-    <header class="border-b border-slate-200 bg-white">
+    <header class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-md">
       <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-        <a href="/" class="font-heading text-lg font-extrabold tracking-tight">
-          <span class="text-brand-600">SGB</span> Dashboard
-          <span class="ml-2 rounded bg-slate-100 px-2 py-0.5 font-mono-num text-[11px] font-medium text-slate-500">P0 skeleton</span>
+        <a href="/" class="flex items-center gap-2.5">
+          <span
+            class="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 font-heading text-sm font-extrabold text-white shadow-sm shadow-brand-600/30">B</span>
+          <span class="font-heading text-base font-extrabold tracking-tight">
+            Beriklan <span class="font-semibold text-slate-400">Dashboard</span>
+          </span>
         </a>
         <nav class="hidden items-center gap-1 text-sm md:flex">
           <a class="rounded-lg px-3 py-1.5 hover:bg-slate-100" href="/">Pagi ini</a>
@@ -57,7 +66,7 @@ const user = Astro.locals.user;
       <slot />
     </main>
     <footer class="mx-auto max-w-5xl px-4 pb-8 text-xs text-slate-400">
-      Powered by Beriklan Agency · P0 skeleton — data live menyusul di P1
+      <span class="font-semibold text-slate-500">Beriklan Agency</span> · laporan otomatis tiap pagi · sgb.beriklan.co.id
     </footer>
   </body>
 </html>
