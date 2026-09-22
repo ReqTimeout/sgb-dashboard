@@ -54,7 +54,7 @@ const roleColor: Record<string, string> = {
 };
 ---
 <Base title="System Health" tenantName="Agency">
-  <div class:list={["relative overflow-hidden rounded-2xl px-6 py-7 grain", healthy ? "" : ""]} style={healthy ? "background: linear-gradient(135deg, #064E3B 0%, #065F46 100%); color: #fff;" : "background: linear-gradient(135deg, #7F1D1D 0%, #991B1B 100%); color: #fff;"}>
+  <div class:list={["relative overflow-hidden rounded-2xl px-6 py-5 grain", healthy ? "" : ""]} style={healthy ? "background: linear-gradient(135deg, #064E3B 0%, #065F46 100%); color: #fff;" : "background: linear-gradient(135deg, #7F1D1D 0%, #991B1B 100%); color: #fff;"}>
     <div class="hazard-stripe absolute inset-x-0 top-0"></div>
     <div class="relative z-10 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
       <div>

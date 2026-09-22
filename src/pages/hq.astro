@@ -30,7 +30,7 @@ const notes = await db.select().from(notesInternal).orderBy(desc(notesInternal.c
 const totals = cards.reduce((a, c) => ({ clicks: a.clicks + c.clicks30, leads: a.leads + c.leads30 }), { clicks: 0, leads: 0 });
 ---
 <Base title="HQ Overview" tenantName="Agency">
-  <div class="relative overflow-hidden rounded-2xl px-6 py-7 grain" style="background: linear-gradient(135deg, #0B0F17 0%, #1C1917 100%); color: #fff;">
+  <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #0B0F17 0%, #1C1917 100%); color: #fff;">
     <div class="hazard-stripe absolute inset-x-0 top-0"></div>
     <div class="pointer-events-none absolute right-6 top-6 hidden h-32 w-32 rounded-full sm:block" style="background: radial-gradient(circle, rgb(37 211 102 / 0.35), transparent 70%)"></div>
     <div class="relative z-10 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">

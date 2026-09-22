@@ -94,6 +94,13 @@
 }
 
 html { background: var(--bg-canvas); color: var(--text-primary); }
+body {
+  background-image: radial-gradient(circle, rgb(100 116 139 / 0.10) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.dark body {
+  background-image: radial-gradient(circle, rgb(148 163 184 / 0.07) 1px, transparent 1px);
+}
 html, body { min-height: 100%; }
 body {
   font-family: var(--font-body);
@@ -153,7 +160,7 @@ button, [role="button"], summary {
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-card), 0 1px 2px rgb(15 23 42 / 0.05);
   transition: transform 200ms var(--ease-out-quint), box-shadow 200ms var(--ease-out-quint), border-color 200ms var(--ease-out-quint);
 }
 .card:hover {
