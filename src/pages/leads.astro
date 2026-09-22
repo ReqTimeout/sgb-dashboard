@@ -1,7 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
-import Chart from "../components/Chart.svelte";
+import LineChartLC from "../components/LineChartLC.svelte";
+import BarChartLC from "../components/BarChartLC.svelte";
 import { getRequestTenant } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { scoreLead, fmtRpShort } from "../lib/ai/lead-score";
@@ -73,26 +74,12 @@ for (const r of rows) {
     revTotal += r.dealValue;
   }
 }
-
-const option = {
-  tooltip: { trigger: "axis" },
-  grid: { left: 36, right: 12, top: 24, bottom: 28 },
-  xAxis: { type: "category", data: days.map((d) => d.slice(5)), axisLabel: { hideOverlap: true } },
-  yAxis: { type: "value" },
-  series: [{ name: "Lead WA", type: "bar", data: days.map((d) => dayMap.get(d) ?? 0), itemStyle: { color: "#25d366" } }],
-};
-const hourOpt = {
-  tooltip: { trigger: "axis" },
-  grid: { left: 36, right: 12, top: 24, bottom: 28 },
-  xAxis: { type: "category", data: hours.map((_, h) => `${h}:00`) },
-  yAxis: { type: "value" },
-  series: [{ name: "Lead", type: "line", smooth: true, data: hours, itemStyle: { color: "#dc2626" }, areaStyle: { opacity: 0.08 } }],
-};
 const shortPage = (u: string | null) => (u ?? "(langsung)").replace("https://sariglassbangunan.com", "") || "/";
 const fmtDate = (ts: unknown) => {
   const d = new Date(String(ts));
   return `${d.getUTCDate()}/${d.getUTCMonth() + 1} ${String(d.getUTCHours()).padStart(2, "0")}.${String(d.getUTCMinutes()).padStart(2, "0")}`;
 };
+
 ---
 <Base title="Pipeline Lead" tenantName={tenant.name}>
   {urgent.length > 0 && (
@@ -186,11 +173,11 @@ const fmtDate = (ts: unknown) => {
 
   <div class="card mt-4 p-4">
     <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Lead per hari</h2>
-    {total > 0 ? <Chart option={option} client:load /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
+    {total > 0 ? <BarChartLC data={days.map((d) => ({ label: d.slice(5), value: dayMap.get(d) ?? 0 }))} height={200} defaultColor="#25d366" /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
   </div>
 
   <div class="card mt-4 p-4">
     <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Jam sibuk</h2>
-    {total > 0 ? <Chart option={hourOpt} height={220} client:load /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
+    {total > 0 ? <LineChartLC data={hours.map((v, h) => ({ date: `2026-01-01T${String(h).padStart(2, "0")}:00`, value: v }))} height={200} color="var(--brand)" /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
   </div>
 </Base>

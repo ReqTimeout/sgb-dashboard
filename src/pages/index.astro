@@ -22,7 +22,29 @@ const sum30 = sumRange(clicks, 30, 0);
 const imp30 = sumRange(impr, 30, 0);
 const d = delta(sum7, prev7);
 const pub = await latestMetric(tenant.id, "content", "articles_published_total");
+const pub24 = await latestMetric(tenant.id, "content", "articles_published_24h");
 const leads = await latestMetric(tenant.id, "wa", "leads");
+const mSpend7 = sumRange(await series(tenant.id, "meta_ads", "spend", 10), 8, 2);
+const mChats7 = sumRange(await series(tenant.id, "meta_ads", "leads", 10), 8, 2);
+const gSpend7 = sumRange(await series(tenant.id, "google_ads", "spend", 10), 8, 2);
+const staleCut = new Date(Date.now() - 12 * 3600 * 1000);
+const staleOldQ = await getDb()
+  .select({ id: leadEvents.id, ts: leadEvents.ts })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), eq(leadEvents.status, "baru")))
+  .orderBy(sql`ts DESC`)
+  .limit(100);
+const staleOldN = staleOldQ.filter((r) => new Date(r.ts).getTime() < staleCut.getTime()).length;
+
+// Strip kesehatan semua channel (satu pandang: sehat / perlu perhatian)
+const mCpa7 = mChats7 > 0 ? mSpend7 / mChats7 : 0;
+const channels = [
+  { href: "/seo", label: "SEO", ok: sum7 > 0, warn: (d.pct ?? 0) < -10, note: sum7 > 0 ? `${fmtInt(sum7)} klik/7h` : "belum ada klik" },
+  { href: "/iklan", label: "Meta", ok: mSpend7 > 0, warn: mCpa7 > 15000, note: mSpend7 > 0 ? `${fmtRp(mCpa7)}/chat` : "tidak ada spend" },
+  { href: "/iklan", label: "Google", ok: gSpend7 > 0, warn: false, note: gSpend7 > 0 ? `${fmtRp(gSpend7)}/7h` : "belum jalan (P9)" },
+  { href: "/leads", label: "WA", ok: staleOldN === 0, warn: staleOldN > 0, note: staleOldN > 0 ? `${staleOldN} mendesak` : "pipeline bersih" },
+  { href: "/konten", label: "Konten", ok: (pub?.value ?? 0) > 0, warn: false, note: pub24?.value ? `+${fmtInt(pub24.value)} kemarin` : `${fmtInt(pub?.value ?? 0)} total` },
+];
 const hasData = clicks.length > 0;
 const sparkClicks = clicks.slice(-14).map((p) => p.value);
 const sparkImpr = impr.slice(-14).map((p) => p.value);
@@ -76,6 +98,20 @@ const headline = hasData
           <div class="text-[10px] text-white/55">kali muncul di Google</div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- STRIP KESEHATAN SEMUA CHANNEL -->
+  <div class="card mt-4 px-4 py-3">
+    <div class="flex items-center gap-2 overflow-x-auto">
+      <span class="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Channel</span>
+      {channels.map((c) => (
+        <a href={c.href} class="flex shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--border-subtle)] px-2.5 py-1 text-xs transition-all hover:-translate-y-px hover:shadow-[var(--shadow-card)]">
+          <span class="h-1.5 w-1.5 rounded-full" style={`background:${!c.ok ? "var(--text-faint)" : c.warn ? "var(--warning)" : "var(--success)"}`}></span>
+          <strong>{c.label}</strong>
+          <span class="text-[color:var(--text-muted)]">{c.note}</span>
+        </a>
+      ))}
     </div>
   </div>
 

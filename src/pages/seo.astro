@@ -1,7 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
-import Chart from "../components/Chart.svelte";
+import LineChartLC from "../components/LineChartLC.svelte";
+import BarChartLC from "../components/BarChartLC.svelte";
 import { getRequestTenant, latestRanks, series, sumRange } from "../lib/data";
 import { fmtInt, fmtNum, fmtPct, fmtRp } from "../lib/insights";
 
@@ -42,20 +43,7 @@ const heroNarative = totClicks > 0
   ? `${fmtInt(totClicks)} klik masuk dari Google 90 hari — ${trendClicks > 0 ? "naik" : trendClicks < 0 ? "turun" : "stabil"} ${Math.abs(trendClicks).toFixed(0)}% vs 30 hari sebelumnya.${avgPos && avgPos <= 10 ? " Halaman 1 Google — bisnis Anda ditemukan tanpa bayar iklan." : " Belum halaman 1 — ada peluang naik."}`
   : "Mesin sudah jalan. Data GSC pertama biasanya masuk H+2 setelah push 05:00 WIB.";
 
-const option = {
-  tooltip: { trigger: "axis" },
-  legend: { data: ["Klik", "Tayang"], top: 0 },
-  grid: { left: 44, right: 12, top: 36, bottom: 28 },
-  xAxis: { type: "category", data: clicks.map((p) => p.date.slice(5)), axisLabel: { hideOverlap: true } },
-  yAxis: [
-    { type: "value", name: "Klik" },
-    { type: "value", name: "Tayang", splitLine: { show: false } },
-  ],
-  series: [
-    { name: "Klik", type: "line", smooth: true, data: clicks.map((p) => p.value), itemStyle: { color: "#dc2626" }, areaStyle: { opacity: 0.08 } },
-    { name: "Tayang", type: "bar", yAxisIndex: 1, data: impr.map((p) => p.value), itemStyle: { color: "#cbd5e1" } },
-  ],
-};
+
 ---
 <Base title="Performa SEO" tenantName={tenant.name}>
   <!-- HERO INSIGHT -->
@@ -90,7 +78,20 @@ const option = {
       <span class="chip text-[10px]">{clicks.length} hari data</span>
     </div>
     <div class="mt-3">
-      {clicks.length > 0 ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — push GSC pertama jalan 05:00 WIB.</p>}
+      {clicks.length > 0 ? (
+        <div class="grid gap-4 lg:grid-cols-2">
+          <div>
+            <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Klik /hari</div>
+            <LineChartLC data={clicks} height={220} color="var(--brand)" />
+          </div>
+          <div>
+            <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Tayang /hari</div>
+            <BarChartLC data={impr.map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={220} defaultColor="#94a3b8" />
+          </div>
+        </div>
+      ) : (
+        <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — push GSC pertama jalan 05:00 WIB.</p>
+      )}
     </div>
   </div>
 

@@ -1,9 +1,13 @@
 ---
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
-import Chart from "../components/Chart.svelte";
+import BarChartLC from "../components/BarChartLC.svelte";
+import LineChartLC from "../components/LineChartLC.svelte";
 import { getRequestTenant, series, sumRange } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { leadEvents } from "../../drizzle/schema";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -28,6 +32,45 @@ const oClicks = sumRange(organicClicks, 30, 0);
 const cpaChat = mChats > 0 ? Math.round(mSpend / mChats) : 0;
 const cpaReply = mReplied > 0 ? Math.round(mSpend / mReplied) : 0;
 const cpc = mClicks > 0 ? Math.round(mSpend / mClicks) : 0;
+const hasAny = mSpend + mChats + mClicks > 0 || gSpend > 0;
+
+// TRACKING HEALTH: gateway + CAPI events + dedupe + GTM live verify
+const tdb = getDb();
+const since7 = new Date();
+since7.setUTCDate(since7.getUTCDate() - 7);
+let gwLive = false;
+try {
+  const r = await fetch("https://capi.beriklan.co.id/healthz", { signal: AbortSignal.timeout(8000) });
+  gwLive = r.ok;
+} catch { gwLive = false; }
+const ev7 = await tdb
+  .select({ n: sql<number>`COUNT(*)`, withId: sql<number>`SUM(${leadEvents.eventId} IS NOT NULL)` })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, since7)));
+const evCount7 = Number(ev7[0]?.n ?? 0);
+const dedupePct = evCount7 > 0 ? Math.round((Number(ev7[0]?.withId ?? 0) / evCount7) * 100) : 0;
+const lastEv = await tdb
+  .select({ ts: leadEvents.ts })
+  .from(leadEvents)
+  .where(eq(leadEvents.tenantId, tenant.id))
+  .orderBy(desc(leadEvents.ts))
+  .limit(1);
+const lastEvStr = lastEv[0] ? String(lastEv[0].ts).slice(0, 16).replace("T", " ") : "—";
+let gtmOk = false;
+try {
+  const r = await fetch("https://www.googletagmanager.com/gtm.js?id=GTM-WQ2BFWVL", { signal: AbortSignal.timeout(10000) });
+  if (r.ok) {
+    const t = await r.text();
+    gtmOk = t.includes("28227479816902794") && t.includes("G-047M864JE7");
+  }
+} catch { gtmOk = false; }
+const trackRows = [
+  { label: "Gateway CAPI", desc: "capi.beriklan.co.id", ok: gwLive, note: gwLive ? "live" : "mati?" },
+  { label: "Event CAPI 7 hari", desc: `${evCount7} lead masuk`, ok: evCount7 > 0, note: `terakhir ${lastEvStr}` },
+  { label: "Dedupe event_id", desc: `${dedupePct}% event ber-ID`, ok: dedupePct >= 80, note: dedupePct >= 80 ? "Pixel+CAPI gabung rapi" : "banyak tanpa ID" },
+  { label: "GTM container", desc: "GTM-WQ2BFWVL", ok: gtmOk, note: gtmOk ? "Pixel+GA4 live di container" : "tidak terverifikasi" },
+];
+const trackOkCount = trackRows.filter((r) => r.ok).length;
 
 // Audit panel: fetch dari admin endpoint /api/audit/meta (token via env)
 let campaigns: { id: string; name: string; spend: number; clicks: number; chat_started: number; chat_replied: number; leads: number }[] = [];
@@ -46,23 +89,7 @@ try {
   }
 } catch (e) { auditError = String(e); }
 
-const dates = spend.map((p) => p.date.slice(5));
-const hasAny = mSpend + mChats + mClicks > 0 || gSpend > 0;
 
-const option = {
-  tooltip: { trigger: "axis" },
-  legend: { data: ["Meta spend (AKTIF)", "Chat WA masuk"], top: 0, textStyle: { fontSize: 10 } },
-  grid: { left: 56, right: 48, top: 36, bottom: 28 },
-  xAxis: { type: "category", data: dates, axisLabel: { hideOverlap: true, fontSize: 10 } },
-  yAxis: [
-    { type: "value", name: "Rp", position: "left", axisLabel: { fontSize: 10 } },
-    { type: "value", name: "Chat", position: "right", axisLabel: { fontSize: 10 } },
-  ],
-  series: [
-    { name: "Meta spend (AKTIF)", type: "bar", data: spend.map((p) => p.value), itemStyle: { color: "#0081fb" } },
-    { name: "Chat WA masuk", type: "line", yAxisIndex: 1, smooth: true, data: chatStarted.map((p) => p.value), itemStyle: { color: "#25D366" }, areaStyle: { opacity: 0.08 } },
-  ],
-};
 ---
 <Base title="Iklan" tenantName={tenant.name}>
   <div class="relative overflow-hidden rounded-2xl px-6 py-7 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
@@ -130,8 +157,42 @@ const option = {
       <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Spend harian vs chat WA <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">30 hari · ACTIVE</span></h2>
       <span class="chip text-[10px]">{fmtInt(mClicks)} klik · CPC {fmtRp(cpc)}</span>
     </div>
-    <div class="mt-3">
-      {hasAny ? <Chart option={option} client:load /> : <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — campaign P9 belum jalan. Producer sudah siap.</p>}
+    {hasAny ? (
+      <div class="mt-3 grid gap-4 lg:grid-cols-2">
+        <div>
+          <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Spend harian (Rp)</div>
+          <BarChartLC data={spend.slice(-30).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={200} defaultColor="#0081fb" />
+        </div>
+        <div>
+          <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Chat WA masuk /hari</div>
+          <LineChartLC data={chatStarted.slice(-30)} height={200} color="#25D366" />
+        </div>
+      </div>
+    ) : (
+      <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — campaign P9 belum jalan. Producer sudah siap.</p>
+    )}
+  </div>
+
+  <!-- TRACKING HEALTH: CAPI + GTM + dedupe -->
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <div>
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🛰️ Status Tracking <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">CAPI · GTM · dedupe — dicek live tiap buka halaman</span></h2>
+      </div>
+      <span class:list={["chip text-[10px]", trackOkCount === trackRows.length ? "chip-success" : trackOkCount >= 2 ? "chip-warning" : "chip-danger"]}>{trackOkCount}/{trackRows.length} sehat</span>
+    </div>
+    <ul class="divide-y divide-[color:var(--border-subtle)]">
+      {trackRows.map((t) => (
+        <li class="flex items-center gap-3 px-5 py-2.5 text-sm">
+          <span class="h-2 w-2 shrink-0 rounded-full" style={`background:${t.ok ? "var(--success)" : "var(--danger)"}`}></span>
+          <span class="font-semibold">{t.label}</span>
+          <span class="text-[color:var(--text-muted)]">{t.desc}</span>
+          <span class="ml-auto text-right text-xs text-[color:var(--text-faint)]">{t.note}</span>
+        </li>
+      ))}
+    </ul>
+    <div class="border-t border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/50 px-5 py-3 text-[11px] leading-relaxed text-[color:var(--text-muted)]">
+      <strong class="text-[color:var(--text-secondary)]">Alur:</strong> klik WA di situs → beacon <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">wa_click_*</code> + <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">event_id</code> → GTM kirim Pixel <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">Contact</code> + gateway kirim CAPI <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">Lead</code> → Meta gabungkan via event_id (dedupe) → Google Ads baca via import GA4. Server-side Rp0/bln (gateway sendiri, bukan GTM Server-side $120/bln).
     </div>
   </div>
 
