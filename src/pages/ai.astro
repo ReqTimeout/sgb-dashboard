@@ -12,24 +12,42 @@ const aiRefs = await latestMetric(tenant.id, "ai", "referrals_7d");
 const llmsTxtUrl = "https://sariglassbangunan.com/llms.txt";
 const robotsUrl = "https://sariglassbangunan.com/robots.txt";
 
+// Verifikasi LIVE langsung ke situs (bukan klaim statis)
+let llmsSize = 0;
+let aiAgents: string[] = [];
+try {
+  const r1 = await fetch("https://sariglassbangunan.com/llms.txt");
+  if (r1.ok) llmsSize = (await r1.text()).length;
+  const r2 = await fetch("https://sariglassbangunan.com/robots.txt");
+  if (r2.ok) {
+    const t = await r2.text();
+    const m = t.match(/^User-agent:\s*(\S+)/gim) ?? [];
+    aiAgents = [...new Set(m.map((s) => s.replace(/^User-agent:\s*/i, "").trim()))].filter((a) => a !== "*");
+  }
+} catch { /* offline — tampilkan klaim terakhir */ }
+
 const items = [
   {
     icon: "📄",
     title: "llms.txt",
-    big: "Live",
-    sub: "24KB komprehensif (produk, brand, area, artikel, FAQ). Dicek tiap 12 jam oleh cron llm-search-ping.",
+    big: llmsSize > 0 ? `${(llmsSize / 1024).toFixed(0)}KB live` : "Live",
+    sub: llmsSize > 0
+      ? `Terverifikasi barusan: ${(llmsSize / 1024).toFixed(1)}KB komprehensif (produk, brand, area, artikel, FAQ). Dicek tiap 12 jam oleh cron llm-search-ping.`
+      : "24KB komprehensif (produk, brand, area, artikel, FAQ). Dicek tiap 12 jam oleh cron llm-search-ping.",
     href: llmsTxtUrl,
     hrefLabel: "Lihat file",
-    ok: true,
+    ok: llmsSize > 5000,
   },
   {
     icon: "🤖",
     title: "Izin crawler AI",
-    big: "13/13",
-    sub: "GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, Bytespider diizinkan robots.txt.",
+    big: aiAgents.length > 0 ? `${aiAgents.length} agen` : "13/13",
+    sub: aiAgents.length > 0
+      ? `Terverifikasi barusan dari robots.txt: ${aiAgents.slice(0, 8).join(", ")}${aiAgents.length > 8 ? ` +${aiAgents.length - 8} lagi` : ""}.`
+      : "GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, Bytespider diizinkan robots.txt.",
     href: robotsUrl,
     hrefLabel: "Cek robots",
-    ok: true,
+    ok: aiAgents.length > 0,
   },
   {
     icon: "🔍",

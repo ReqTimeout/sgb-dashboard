@@ -14,6 +14,21 @@ const errRuns = await latestMetric(tenant.id, "system", "cron_err_24h");
 const pending = await latestMetric(tenant.id, "seo", "indexing_pending");
 const healthy = (errRuns?.value ?? 0) === 0;
 
+// Status REAL per-cron dari admin (run terakhir + error asli)
+let liveCrons: { name: string; started_at: string; ok: boolean; error: string | null; summary: unknown }[] = [];
+let liveOk = false;
+try {
+  const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
+  const adminToken = process.env.SGB_INGEST_KEY ?? "";
+  const r = await fetch(`${adminUrl}/api/audit/crons?token=${encodeURIComponent(adminToken)}`);
+  if (r.ok) {
+    const j = await r.json();
+    liveCrons = j.crons ?? [];
+    liveOk = true;
+  }
+} catch { /* admin down — pakai daftar statis */ }
+const liveMap = new Map(liveCrons.map((c) => [c.name, c]));
+
 const crons = [
   { name: "publish-articles", time: "06:00", role: "terbit" },
   { name: "seo-publish-pipeline", time: "06:15", role: "commit" },
@@ -59,19 +74,32 @@ const roleColor: Record<string, string> = {
 
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
-      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Daftar cron <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">semua otomasi</span></h2>
-      <span class="chip text-[10px]">{crons.length} aktif</span>
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Daftar cron <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">run terakhir + status asli</span></h2>
+      <span class="chip text-[10px]">{liveOk ? "live dari admin" : `${crons.length} terdaftar`}</span>
     </div>
     <ul class="divide-y divide-[color:var(--border-subtle)]">
-      {crons.map((c) => (
-        <li class="flex items-center gap-3 px-5 py-2.5 text-sm transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
-          <span class="h-2 w-2 rounded-full" style={`background:${roleColor[c.role]}`}></span>
-          <span class="font-[family-name:var(--font-mono-num)] text-xs font-semibold">{c.name}</span>
-          <span class="ml-auto font-[family-name:var(--font-mono-num)] text-xs text-[color:var(--text-muted)]">{c.time}</span>
-          <span class="chip text-[10px]">{c.role}</span>
-        </li>
-      ))}
+      {crons.map((c) => {
+        const live = liveMap.get(c.name);
+        return (
+          <li class="px-5 py-2.5 text-sm transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+            <div class="flex items-center gap-3">
+              <span class="h-2 w-2 shrink-0 rounded-full" style={`background:${live ? (live.ok ? "var(--success)" : "var(--danger)") : roleColor[c.role]}`}></span>
+              <span class="font-[family-name:var(--font-mono-num)] text-xs font-semibold">{c.name}</span>
+              {live && !live.ok && <span class="chip chip-danger !text-[9px]">ERROR</span>}
+              {live && live.ok && <span class="chip chip-success !text-[9px]">OK</span>}
+              <span class="ml-auto font-[family-name:var(--font-mono-num)] text-xs text-[color:var(--text-muted)]">{c.time}</span>
+              <span class="chip text-[10px]">{c.role}</span>
+            </div>
+            {live && (
+              <div class="mt-1 pl-5 text-[11px] text-[color:var(--text-faint)]">
+                run terakhir: {String(live.started_at).slice(0, 16).replace("T", " ")}
+                {live.error && <span class="mt-0.5 block rounded bg-[color:var(--danger-soft)] px-2 py-1 font-mono text-[10px] text-[color:var(--danger)]">{live.error.slice(0, 220)}</span>}
+              </div>
+            )}
+          </li>
+        );
+      })}
     </ul>
-    <p class="border-t border-[color:var(--border-subtle)] px-5 py-3 text-[11px] text-[color:var(--text-faint)]">Detail per-run ada di admin Sari Glass (<code class="rounded bg-[color:var(--bg-surface-2)] px-1">cron_runs</code>).</p>
+    <p class="border-t border-[color:var(--border-subtle)] px-5 py-3 text-[11px] text-[color:var(--text-faint)]">Status diambil live dari admin tiap buka halaman. Detail penuh di admin Sari Glass (<code class="rounded bg-[color:var(--bg-surface-2)] px-1">cron_runs</code>).</p>
   </div>
 </Base>
