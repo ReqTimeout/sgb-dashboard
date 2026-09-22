@@ -68,8 +68,8 @@ const heroNarative = totClicks > 0
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
     <StatCard label="Klik 90 hari" value={fmtInt(totClicks)} delta={trendClicks} spark={clicks.slice(-14).map((p) => p.value)} />
     <StatCard label="Tayang 90 hari" value={fmtNum(totImpr)} delta={trendImpr} hint="kali tampil di pencarian" spark={impr.slice(-14).map((p) => p.value)} />
-    <StatCard label="CTR rata-rata" value={fmtPct(avgCtr)} hint="benchmark Indonesia e-commerce 2-4%" />
-    <StatCard label="Posisi rata-rata" value={avgPos ? avgPos.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" />
+    <StatCard label="CTR rata-rata" value={fmtPct(avgCtr)} hint="benchmark Indonesia e-commerce 2-4%" ok={(avgCtr ?? 0) >= 0.02} warn={(avgCtr ?? 1) < 0.01} />
+    <StatCard label="Posisi rata-rata" value={avgPos ? avgPos.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" ok={avgPos != null && avgPos <= 10} warn={avgPos != null && avgPos > 20} />
   </div>
 
   <div class="card mt-4 p-5">
