@@ -168,7 +168,7 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
       </div>
       <div class="mt-3">
         <div class="mb-1 text-[10px] text-[color:var(--text-faint)]">Belanja harian</div>
-        <BarChartLC data={mSpendS.slice(-14).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={140} barClass="fill-[color:var(--brand)]" client:visible />
+        <BarChartLC data={mSpendS.slice(-14).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={140} barClass="fill-[#0081fb]" client:visible />
       </div>
     </div>
     <div class="card p-5">

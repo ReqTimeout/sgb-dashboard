@@ -50,7 +50,7 @@ const toneDot = warn ? "var(--danger)" : ok ? "var(--success)" : "var(--border-s
   {hint && <div class="mt-1 text-[11px] text-[color:var(--text-muted)]">{hint}</div>}
   {spark && spark.length > 1 && (
     <div class="mt-2 -mb-1 -mx-1">
-      <Sparkline values={spark} stroke={warn ? "var(--danger)" : ok ? "var(--success)" : "var(--brand)"} />
+      <Sparkline values={spark} stroke={warn ? "var(--c-bad)" : ok ? "var(--c-good)" : "var(--c-neutral-soft)"} />
     </div>
   )}
 </div>

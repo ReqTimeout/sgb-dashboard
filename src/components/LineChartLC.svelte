@@ -7,7 +7,7 @@
     height?: number;
     color?: string;
   }
-  const { data, height = 200, color = "var(--brand)" }: Props = $props();
+  const { data, height = 200, color = "var(--c-neutral)" }: Props = $props();
 
   type Row = { label: string; fullDate: string; value: number };
   const rows: Row[] = $derived(

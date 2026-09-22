@@ -286,3 +286,54 @@ input:focus, textarea:focus, select:focus {
   font-weight: 800;
   line-height: 1;
 }
+
+/* SISTEM WARNA SEMANTIK (berlaku SEMUA halaman):
+   netral = slate (data biasa) · hijau = bagus · merah = perhatian/jelek · amber = pantau.
+   DILARANG merah flat untuk data netral. */
+:root {
+  --c-neutral: #64748b;
+  --c-neutral-soft: #cbd5e1;
+  --c-good: #10b981;
+  --c-good-soft: rgb(16 185 129 / 0.10);
+  --c-bad: #dc2626;
+  --c-bad-soft: rgb(220 38 38 / 0.08);
+  --c-warn: #f59e0b;
+  --c-warn-soft: rgb(245 158 11 / 0.10);
+  --c-info: #0081fb;
+}
+.dark {
+  --c-neutral-soft: #3a4868;
+}
+
+/* TABEL konsisten di semua card */
+.card table, .tbl {
+  width: 100%;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+.card thead th, .tbl thead th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+.card thead th.num, .tbl thead th.num { text-align: right; }
+.card tbody td, .tbl tbody td {
+  padding: 10px 20px;
+  border-top: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+.card tbody tr:first-child td, .tbl tbody tr:first-child td { border-top: 0; }
+.card tbody tr, .tbl tbody tr { transition: background 150ms var(--ease-out-quint); }
+.card tbody tr:hover, .tbl tbody tr:hover { background: var(--bg-surface-2); }
+.card td.num, .tbl td.num {
+  text-align: right;
+  font-family: var(--font-mono-num);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

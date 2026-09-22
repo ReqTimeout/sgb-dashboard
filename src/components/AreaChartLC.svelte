@@ -5,8 +5,10 @@
   interface Props {
     data: Point[];
     height?: number;
+    /** Warna garis. Default netral (slate). Hijau/merah HANYA untuk status baik/buruk. */
+    color?: string;
   }
-  const { data, height = 220 }: Props = $props();
+  const { data, height = 220, color = "var(--c-neutral)" }: Props = $props();
 
   type Row = { label: string; fullDate: string; value: number };
   const rows: Row[] = $derived(
@@ -37,8 +39,8 @@
         }}
       />
       <Area
-        line={{ class: "stroke-[color:var(--brand)] stroke-2" }}
-        class="fill-[color:var(--brand)] fill-opacity-10"
+        line={{ style: `stroke: ${color}; stroke-width: 2` }}
+        style={`fill: ${color}; fill-opacity: 0.08`}
       />
       <Highlight points lines />
     </Svg>

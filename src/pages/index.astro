@@ -182,7 +182,7 @@ const headline = hasData
           </div>
           <div>
             <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Lead WhatsApp</div>
-            <AreaChartLC data={sparkLeads.map((v, i) => ({ date: sparkLeads.length > 0 ? `d${i}` : `d${i}`, value: v }))} height={160}  client:visible />
+            <AreaChartLC data={sparkLeads.map((v, i) => ({ date: sparkLeads.length > 0 ? `d${i}` : `d${i}`, value: v }))} height={160} color="var(--c-good)" client:visible />
           </div>
         </div>
       ) : (

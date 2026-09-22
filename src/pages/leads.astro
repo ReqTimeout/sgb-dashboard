@@ -173,7 +173,7 @@ const fmtDate = (ts: unknown) => {
 
   <div class="card mt-4 p-4">
     <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Lead per hari</h2>
-    {total > 0 ? <BarChartLC data={days.map((d) => ({ label: d.slice(5), value: dayMap.get(d) ?? 0 }))} height={200}  client:visible /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
+    {total > 0 ? <BarChartLC data={days.map((d) => ({ label: d.slice(5), value: dayMap.get(d) ?? 0 }))} height={200} barClass="fill-[#25d366]" client:visible /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
   </div>
 
   <div class="card mt-4 p-4">
