@@ -1,7 +1,11 @@
 ---
 import Base from "../layouts/Base.astro";
+import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, series, sumRange } from "../lib/data";
-import { fmtInt } from "../lib/insights";
+import { fmtInt, fmtRp } from "../lib/insights";
+import { and, eq, gte, sql } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { leadEvents } from "../../drizzle/schema";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -12,32 +16,101 @@ const gSpend = sumRange(await series(tenant.id, "google_ads", "spend", 30), 30, 
 const mLeads = Math.round(sumRange(await series(tenant.id, "meta_ads", "leads", 30), 30, 0));
 const gConv = Math.round(sumRange(await series(tenant.id, "google_ads", "conversions", 30), 30, 0));
 const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0));
-const waLeads: number = 0; // TODO P4b-C5: agregat lead_events sudah ada di /leads
+
+const since = new Date();
+since.setUTCDate(since.getUTCDate() - 30);
+const db = getDb();
+const dealRows = await db
+  .select({ source: leadEvents.source, sum: sql<number>`COALESCE(SUM(${leadEvents.dealValue}), 0)` })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), eq(leadEvents.status, "deal"), gte(leadEvents.ts, since)))
+  .groupBy(leadEvents.source);
+const revenue = dealRows.reduce((a, r) => a + Number(r.sum ?? 0), 0);
 
 const totalSpend = mSpend + gSpend;
-const totalLeads = mLeads + gConv + waLeads;
+const totalLeads = mLeads + gConv;
+const cpa = totalLeads ? Math.round(totalSpend / totalLeads) : 0;
 const story = totalSpend === 0 && totalLeads === 0 && orgClicks === 0
   ? "Belum ada data — mesin pengumpul sudah jalan, angka terisi otomatis."
   : totalSpend === 0
     ? `Bulan ini Rp0 iklan → traffic murni organik (${fmtInt(orgClicks)} klik Google). Saat P9 jalan, baris ini jadi cerita ROI utuh.`
-    : `Bulan ini: Rp${fmtInt(totalSpend)} iklan → ${fmtInt(totalLeads)} lead/konversi + ${fmtInt(orgClicks)} klik organik gratis.`;
+    : `Bulan ini: ${fmtRp(totalSpend)} iklan → ${fmtInt(totalLeads)} lead/konversi + ${fmtInt(orgClicks)} klik organik gratis.${revenue ? ` Revenue tercatat ${fmtRp(revenue)}.` : ""}`;
 ---
-<Base title="ROI Lintas Channel">
-  <p class="mt-1 text-sm text-slate-500">{tenant.name} · jawaban "duit saya jadi apa?"</p>
-
-  <div class="mt-6 rounded-2xl bg-[#1C1917] p-6 text-white">
-    <div class="text-xs tracking-widest text-[#FACC15]">RINGKASAN 30 HARI</div>
-    <p class="mt-2 font-heading text-xl font-bold leading-snug">{story}</p>
-    <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <div class="rounded-xl bg-white/10 p-3"><div class="font-mono-num text-xl font-bold">Rp{fmtInt(totalSpend)}</div><div class="text-xs opacity-70">Total iklan</div></div>
-      <div class="rounded-xl bg-white/10 p-3"><div class="font-mono-num text-xl font-bold">{fmtInt(totalLeads)}</div><div class="text-xs opacity-70">Lead/konversi iklan</div></div>
-      <div class="rounded-xl bg-white/10 p-3"><div class="font-mono-num text-xl font-bold">{fmtInt(orgClicks)}</div><div class="text-xs opacity-70">Klik organik gratis</div></div>
-      <div class="rounded-xl bg-white/10 p-3"><div class="font-mono-num text-xl font-bold">{totalLeads ? "Rp" + fmtInt(totalSpend / totalLeads) : "—"}</div><div class="text-xs opacity-70">Biaya per lead</div></div>
+<Base title="ROI Lintas Channel" tenantName={tenant.name}>
+  <div class="relative overflow-hidden rounded-2xl px-6 py-8 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="pointer-events-none absolute -bottom-20 -right-20 h-80 w-80 rounded-full" style="background: radial-gradient(circle, rgb(37 211 102 / 0.25), transparent 70%)"></div>
+    <div class="pointer-events-none absolute -top-20 -left-20 h-72 w-72 rounded-full" style="background: radial-gradient(circle, rgb(220 38 38 / 0.20), transparent 70%)"></div>
+    <div class="relative z-10 max-w-2xl">
+      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Jawaban untuk Bos</div>
+      <h2 class="mt-2 text-display text-3xl sm:text-5xl">Duit saya<br /><span style="color:#FACC15">jadi apa?</span></h2>
+      <p class="mt-3 text-base text-white/80">{story}</p>
     </div>
   </div>
 
-  <div class="mt-4 grid gap-3 sm:grid-cols-2">
-    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-heading text-sm font-bold">Meta Ads</div><div class="mt-1 text-sm">Rp{fmtInt(mSpend)} → {fmtInt(mLeads)} lead</div></div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="font-heading text-sm font-bold">Google Ads</div><div class="mt-1 text-sm">Rp{fmtInt(gSpend)} → {fmtInt(gConv)} konversi</div></div>
+  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <StatCard label="Total iklan 30 hari" value={fmtRp(totalSpend)} hint="Meta + Google" />
+    <StatCard label="Lead/konversi iklan" value={fmtInt(totalLeads)} hint="dari Meta + Google" />
+    <StatCard label="Klik organik gratis" value={fmtInt(orgClicks)} hint="dari Google Search" />
+    <StatCard label="Biaya per lead" value={totalLeads ? fmtRp(cpa) : "—"} hint={totalLeads ? "CPA gabungan" : "menunggu lead pertama"} warn={cpa > 500000} />
+  </div>
+
+  {revenue > 0 && (
+    <div class="card mt-4 flex items-center gap-4 px-5 py-4" style="background: linear-gradient(135deg, rgb(16 185 129 / 0.10), transparent);">
+      <div class="grid h-12 w-12 place-items-center rounded-xl bg-[color:var(--success-soft)] text-[color:var(--success)]">
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+      <div class="flex-1">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Revenue tercatat</div>
+        <div class="font-[family-name:var(--font-display)] text-2xl font-extrabold text-[color:var(--success)]">{fmtRp(revenue)}</div>
+      </div>
+      <a href="/leads" class="btn btn-ghost text-xs">Lihat pipeline →</a>
+    </div>
+  )}
+
+  <div class="mt-4 grid gap-3 lg:grid-cols-2">
+    <div class="card p-5">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="grid h-7 w-7 place-items-center rounded-md text-xs font-bold text-white" style="background:#0081fb">M</span>
+          <span class="font-[family-name:var(--font-heading)] text-sm font-bold">Meta Ads</span>
+        </div>
+        <span class="chip text-[10px]">30 hari</span>
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div><div class="font-[family-name:var(--font-mono-num)] text-lg font-extrabold">{fmtRp(mSpend)}</div><div class="text-[10px] text-[color:var(--text-faint)]">spend</div></div>
+        <div><div class="font-[family-name:var(--font-mono-num)] text-lg font-extrabold">{fmtInt(mLeads)}</div><div class="text-[10px] text-[color:var(--text-faint)]">lead</div></div>
+        <div><div class="font-[family-name:var(--font-mono-num)] text-lg font-extrabold" class:list={[(mLeads > 0 && mSpend / mLeads > 500000) ? "text-[color:var(--danger)]" : ""]}>{mLeads ? fmtRp(Math.round(mSpend / mLeads)) : "—"}</div><div class="text-[10px] text-[color:var(--text-faint)]">CPA</div></div>
+      </div>
+      <div class="mt-3 h-2 overflow-hidden rounded-full bg-[color:var(--bg-surface-2)]">
+        <div class="h-full" style="width:85%;background:linear-gradient(90deg,#0081fb,#0ea5e9)"></div>
+      </div>
+    </div>
+    <div class="card p-5">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="grid h-7 w-7 place-items-center rounded-md text-xs font-bold" style="background:#FACC15;color:#1C1917">G</span>
+          <span class="font-[family-name:var(--font-heading)] text-sm font-bold">Google Ads</span>
+        </div>
+        <span class="chip text-[10px]">30 hari</span>
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div><div class="font-[family-name:var(--font-mono-num)] text-lg font-extrabold">{fmtRp(gSpend)}</div><div class="text-[10px] text-[color:var(--text-faint)]">spend</div></div>
+        <div><div class="font-[family-name:var(--font-mono-num)] text-lg font-extrabold">{fmtInt(gConv)}</div><div class="text-[10px] text-[color:var(--text-faint)]">konversi</div></div>
+        <div><div class="font-[family-name:var(--font-mono-num)] text-lg font-extrabold">{gConv ? fmtRp(Math.round(gSpend / gConv)) : "—"}</div><div class="text-[10px] text-[color:var(--text-faint)]">CPA</div></div>
+      </div>
+      <div class="mt-3 h-2 overflow-hidden rounded-full bg-[color:var(--bg-surface-2)]">
+        <div class="h-full" style="width:0%;background:linear-gradient(90deg,#FACC15,#f97316)"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-4 p-5 text-sm">
+    <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Cara baca</div>
+    <p class="mt-1 text-[color:var(--text-secondary)]">
+      <strong class="text-[color:var(--text-primary)]">Iklan = bayar, organik = gratis.</strong> Kalau biaya per lead iklan lebih mahal dari nilai deal biasa,
+      berarti iklan belum efisien (lihat <a class="text-[color:var(--info)] hover:underline" href="/iklan">/iklan</a> untuk optimasi creative/audience).
+      Revenue tercatat di input manual pipeline (<a class="text-[color:var(--info)] hover:underline" href="/leads">/pipeline</a>).
+    </p>
   </div>
 </Base>

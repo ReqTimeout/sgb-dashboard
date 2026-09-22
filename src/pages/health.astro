@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestMetric } from "../lib/data";
 import { fmtInt } from "../lib/insights";
 
@@ -13,34 +14,64 @@ const errRuns = await latestMetric(tenant.id, "system", "cron_err_24h");
 const pending = await latestMetric(tenant.id, "seo", "indexing_pending");
 const healthy = (errRuns?.value ?? 0) === 0;
 
-const crons = ["publish-articles", "seo-publish-pipeline", "sitemap-ping", "daily-report (P4)", "gsc-indexing", "indexnow", "gsc-url-inspection", "llm-search-ping", "health-check", "weekly-report", "push-metrics (P2)"];
+const crons = [
+  { name: "publish-articles", time: "06:00", role: "terbit" },
+  { name: "seo-publish-pipeline", time: "06:15", role: "commit" },
+  { name: "sitemap-ping", time: "06:30", role: "ping" },
+  { name: "daily-report", time: "06:45", role: "email" },
+  { name: "gsc-indexing", time: "30m", role: "index" },
+  { name: "indexnow", time: "2h", role: "index" },
+  { name: "gsc-url-inspection", time: "6h", role: "audit" },
+  { name: "llm-search-ping", time: "12h", role: "ai" },
+  { name: "health-check", time: "1h", role: "audit" },
+  { name: "weekly-report", time: "Senin 07:00", role: "email" },
+  { name: "push-metrics", time: "05:00", role: "collector" },
+  { name: "meta-insights", time: "05:30", role: "ads" },
+  { name: "google-insights", time: "05:35", role: "ads" },
+  { name: "keyword-snapshot", time: "05:10", role: "seo" },
+  { name: "keyword-harvester", time: "Senin 08:10", role: "seo" },
+  { name: "lead-reminder", time: "07:00", role: "pipeline" },
+];
+const roleColor: Record<string, string> = {
+  terbit: "var(--success)", commit: "var(--info)", ping: "var(--text-muted)", email: "var(--warning)",
+  index: "var(--info)", audit: "var(--text-muted)", ai: "var(--brand)", collector: "var(--text-secondary)",
+  ads: "var(--brand)", seo: "var(--info)", pipeline: "var(--warning)",
+};
 ---
-<Base title="System Health">
-  <p class="mt-1 text-sm text-slate-500">{tenant.name} · ringkasan 24 jam terakhir (dari push-metrics 05:00 WIB)</p>
-
-  <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <div class={`font-mono-num text-3xl font-semibold ${healthy ? "text-emerald-600" : "text-red-600"}`}>{healthy ? "SEHAT" : "CEK"}</div>
-      <div class="mt-1 font-heading text-sm font-bold">Status mesin</div>
-      <div class="text-xs text-slate-400">{fmtInt(okRuns?.value)} run OK · {fmtInt(errRuns?.value)} error /24 jam</div>
-    </div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <div class="font-mono-num text-3xl font-semibold">{pending ? fmtInt(pending.value) : "—"}</div>
-      <div class="mt-1 font-heading text-sm font-bold">Antre index</div>
-      <div class="text-xs text-slate-400">URL menunggu Google</div>
-    </div>
-    <div class="rounded-2xl border border-slate-200 bg-white p-4">
-      <div class="font-mono-num text-3xl font-semibold">{crons.length}</div>
-      <div class="mt-1 font-heading text-sm font-bold">Cron terdaftar</div>
-      <div class="text-xs text-slate-400">9 existing + 2 baru</div>
+<Base title="System Health" tenantName="Agency">
+  <div class:list={["relative overflow-hidden rounded-2xl px-6 py-7 grain", healthy ? "" : ""]} style={healthy ? "background: linear-gradient(135deg, #064E3B 0%, #065F46 100%); color: #fff;" : "background: linear-gradient(135deg, #7F1D1D 0%, #991B1B 100%); color: #fff;"}>
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="relative z-10 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="pulse-dot" style={healthy ? "background:#34d399" : "background:#fbbf24"}></span>
+          <span class="text-[10px] font-semibold uppercase tracking-[0.14em]" style={healthy ? "color:#A7F3D0" : "color:#FED7AA"}>{healthy ? "Semua sistem normal" : "Ada yang perlu dicek"}</span>
+        </div>
+        <div class="mt-2 text-display text-4xl sm:text-5xl">{healthy ? "SEHAT" : "PERIKSA"}</div>
+        <p class="mt-2 text-sm text-white/70">{fmtInt(okRuns?.value)} run OK · {fmtInt(errRuns?.value)} error /24 jam</p>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Antre index</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up">{pending ? fmtInt(pending.value) : "—"}</div></div>
+        <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Cron</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up">{crons.length}</div></div>
+      </div>
     </div>
   </div>
 
-  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-heading font-bold">Daftar cron</h2>
-    <ul class="mt-2 grid gap-1 text-sm sm:grid-cols-2">
-      {crons.map((c) => (<li class="rounded-lg bg-slate-50 px-3 py-1.5 font-mono-num text-xs">{c}</li>))}
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Daftar cron <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">semua otomasi</span></h2>
+      <span class="chip text-[10px]">{crons.length} aktif</span>
+    </div>
+    <ul class="divide-y divide-[color:var(--border-subtle)]">
+      {crons.map((c) => (
+        <li class="flex items-center gap-3 px-5 py-2.5 text-sm transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+          <span class="h-2 w-2 rounded-full" style={`background:${roleColor[c.role]}`}></span>
+          <span class="font-[family-name:var(--font-mono-num)] text-xs font-semibold">{c.name}</span>
+          <span class="ml-auto font-[family-name:var(--font-mono-num)] text-xs text-[color:var(--text-muted)]">{c.time}</span>
+          <span class="chip text-[10px]">{c.role}</span>
+        </li>
+      ))}
     </ul>
-    <p class="mt-2 text-xs text-slate-400">Detail per-run ada di admin Sari Glass (cron_runs). Halaman ini ringkasan push harian.</p>
+    <p class="border-t border-[color:var(--border-subtle)] px-5 py-3 text-[11px] text-[color:var(--text-faint)]">Detail per-run ada di admin Sari Glass (<code class="rounded bg-[color:var(--bg-surface-2)] px-1">cron_runs</code>).</p>
   </div>
 </Base>

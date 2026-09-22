@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestMetric, recentArticles } from "../lib/data";
 import { fmtInt } from "../lib/insights";
 
@@ -11,37 +12,65 @@ const pubTotal = await latestMetric(tenant.id, "content", "articles_published_to
 const draftTotal = await latestMetric(tenant.id, "content", "articles_draft_total");
 const pub24 = await latestMetric(tenant.id, "content", "articles_published_24h");
 const pending = await latestMetric(tenant.id, "seo", "indexing_pending");
-const list = await recentArticles(tenant.id, 20);
+const list = await recentArticles(tenant.id, 15);
 
-const steps = [
-  { label: "Draft siap", value: draftTotal?.value, note: "menunggu jadwal terbit" },
-  { label: "Terbit 24 jam", value: pub24?.value, note: "artikel baru kemarin" },
-  { label: "Total terbit", value: pubTotal?.value, note: "sejak mesin jalan" },
-  { label: "Antre index", value: pending?.value, note: "URL menunggu Google" },
+const stages = [
+  { label: "Antre", value: 79, note: "keyword menunggu draft", tint: "var(--text-faint)" },
+  { label: "Draft", value: draftTotal?.value, note: "siap terbit", tint: "var(--warning)" },
+  { label: "Terbit 24 jam", value: pub24?.value, note: "artikel baru", tint: "var(--info)" },
+  { label: "Total", value: pubTotal?.value, note: "akumulasi", tint: "var(--success)" },
+  { label: "Antre index", value: pending?.value, note: "menunggu Google", tint: "var(--brand)" },
 ];
+const maxV = Math.max(...stages.map((s) => Number(s.value ?? 0)), 1);
 ---
-<Base title="Content Pipeline">
-  <p class="mt-1 text-sm text-slate-500">{tenant.name} · mesin konten bekerja transparan — tanpa perlu tanya.</p>
+<Base title="Content Pipeline" tenantName={tenant.name}>
+  <p class="text-sm text-[color:var(--text-muted)]">{tenant.name} · mesin konten bekerja transparan — tanpa perlu tanya.</p>
 
-  <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    {steps.map((s, i) => (
-      <div class="relative rounded-2xl border border-slate-200 bg-white p-4">
-        {i < steps.length - 1 && <div class="absolute -right-2.5 top-1/2 hidden h-0 w-0 -translate-y-1/2 border-y-8 border-l-8 border-y-transparent border-l-brand-600 sm:block" />}
-        <div class="font-mono-num text-3xl font-semibold">{s.value != null ? fmtInt(s.value) : "—"}</div>
-        <div class="mt-1 font-heading text-sm font-bold">{s.label}</div>
-        <div class="text-xs text-slate-400">{s.note}</div>
-      </div>
-    ))}
+  <div class="mt-4 relative rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-5">
+    <div class="dot-grid absolute inset-0 opacity-40 rounded-2xl"></div>
+    <div class="relative grid grid-cols-2 gap-3 sm:grid-cols-5">
+      {stages.map((s, i) => (
+        <div class="relative">
+          <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-3 transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]">
+            <div class="flex items-center gap-2">
+              <span class="font-[family-name:var(--font-mono-num)] text-[10px] font-extrabold" style={`color:${s.tint}`}>{String(i + 1).padStart(2, "0")}</span>
+              <span class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">{s.label}</span>
+            </div>
+            <div class="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold tracking-tight">{s.value != null ? fmtInt(s.value) : "—"}</div>
+            <div class="mt-1 text-[11px] text-[color:var(--text-muted)]">{s.note}</div>
+            <div class="mt-2 h-1 overflow-hidden rounded-full bg-[color:var(--bg-surface-2)]">
+              <div class="h-full rounded-full" style={`width:${Math.min(100, (Number(s.value ?? 0) / maxV) * 100).toFixed(0)}%;background:${s.tint}`}></div>
+            </div>
+          </div>
+          {i < stages.length - 1 && (
+            <svg class="pointer-events-none absolute -right-2 top-1/2 hidden h-4 w-2 -translate-y-1/2 text-[color:var(--text-faint)] sm:block" viewBox="0 0 8 16" fill="currentColor"><path d="M0 0 L8 8 L0 16 Z"/></svg>
+          )}
+        </div>
+      ))}
+    </div>
   </div>
 
-  <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-    <h2 class="font-heading font-bold">Artikel terbaru <span class="font-body text-xs font-normal text-slate-400">snapshot push harian</span></h2>
-    <table class="mt-2 w-full text-sm">
-      <thead><tr class="text-left text-xs text-slate-400"><th class="py-1">Judul</th><th class="py-1 text-right">Status</th></tr></thead>
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Artikel terbaru <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">snapshot push harian</span></h2>
+      <span class="chip text-[10px]">{list.length}</span>
+    </div>
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+          <th class="px-5 py-2">Judul</th>
+          <th class="px-5 py-2 text-right">Status</th>
+        </tr>
+      </thead>
       <tbody>
-        {list.length === 0 && <tr><td colspan="2" class="py-4 text-center text-slate-400">Belum ada snapshot — push pertama 05:00 WIB.</td></tr>}
+        {list.length === 0 && <tr><td colspan="2" class="px-4 py-10 text-center text-[color:var(--text-faint)]">Belum ada snapshot — push pertama 05:00 WIB.</td></tr>}
         {list.map((a) => (
-          <tr class="border-t border-slate-100"><td class="py-1.5 pr-2">{a.title}</td><td class="py-1.5 text-right"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700">{a.status}</span></td></tr>
+          <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+            <td class="px-5 py-2.5">{a.title}</td>
+            <td class="px-5 py-2.5 text-right">
+              <span class="chip chip-success text-[10px]">{a.status}</span>
+            </td>
+          </tr>
         ))}
       </tbody>
     </table>

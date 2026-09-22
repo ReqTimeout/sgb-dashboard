@@ -21,27 +21,81 @@ function num(p: unknown, k: string): string {
   const v = (p as Record<string, unknown> | null)?.[k];
   return typeof v === "number" ? new Intl.NumberFormat("id-ID").format(Math.round(v)) : "—";
 }
+function pct(p: unknown, k: string): string {
+  const v = (p as Record<string, unknown> | null)?.[k];
+  if (typeof v !== "number") return "—";
+  const sign = v > 0 ? "▲" : v < 0 ? "▼" : "·";
+  const cls = v > 0 ? "chip-success" : v < 0 ? "chip-danger" : "chip";
+  return `<span class="chip ${cls} text-[10px]">${sign}${Math.abs(v).toFixed(0)}%</span>`;
+}
+const totalSent = rows.filter((r) => r.emailSentAt).length;
+const totalErr = rows.reduce((a, r) => a + Number(((r.payloadJson as Record<string, unknown> | null)?.cron_err) ?? 0), 0);
 ---
-<Base title="Arsip Laporan">
-  <p class="mt-1 text-sm text-slate-500">{tenant.name} · semua email harian 06:45 tersimpan di sini — tidak perlu cari-cari inbox.</p>
+<Base title="Arsip Laporan" tenantName={tenant.name}>
+  <div class="relative overflow-hidden rounded-2xl border border-[color:var(--border-subtle)] px-6 py-7 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="relative z-10 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Arsip Laporan</div>
+        <div class="mt-1 text-display text-3xl sm:text-4xl">Laporan otomatis<br /><span style="color:#FACC15">tiap pagi.</span></div>
+        <p class="mt-2 max-w-md text-sm text-white/70">Semua email 06:45 WIB tersimpan di sini — tidak perlu cari-cari inbox.</p>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <div class="rounded-lg border border-white/15 px-3 py-2">
+          <div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Total</div>
+          <div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up">{rows.length}</div>
+        </div>
+        <div class="rounded-lg border border-white/15 px-3 py-2">
+          <div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Terkirim</div>
+          <div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up" style="color:#34d399">{totalSent}</div>
+        </div>
+        <div class="rounded-lg border border-white/15 px-3 py-2">
+          <div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Cron error</div>
+          <div class:list={["font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up", totalErr > 0 ? "text-[#f87171]" : "text-white/40"]}>{totalErr}</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  <div class="mt-6 grid gap-3">
-    {rows.length === 0 && <p class="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">Belum ada laporan — push pertama dari cron daily-report 06:45.</p>}
+  <div class="mt-4 space-y-3">
+    {rows.length === 0 && (
+      <div class="card p-10 text-center">
+        <div class="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-[color:var(--brand-soft)] text-[color:var(--brand)]">
+          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3 7h18v12H3zM3 7l9 7 9-7"/></svg>
+        </div>
+        <h3 class="font-[family-name:var(--font-heading)] text-base font-bold">Belum ada laporan</h3>
+        <p class="mt-1 text-sm text-[color:var(--text-muted)]">Push pertama dari cron daily-report 06:45 WIB — biasanya besok pagi sudah muncul di sini.</p>
+      </div>
+    )}
     {rows.map((r) => {
       const p = r.payloadJson as Record<string, unknown> | null;
+      const insight = (p?.insight_text as string) ?? "";
       return (
-        <div class="rounded-2xl border border-slate-200 bg-white p-4">
-          <div class="flex items-center justify-between">
-            <strong class="font-heading">{r.reportDate} <span class="ml-1 rounded bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">{r.period}</span></strong>
-            <span class="text-xs text-slate-400">{r.emailSentAt ? "📧 terkirim" : "arsip saja"}</span>
+        <details class="card overflow-hidden">
+          <summary class="flex cursor-pointer items-center gap-3 px-5 py-4">
+            <span class="grid h-10 w-10 place-items-center rounded-lg bg-[color:var(--brand-soft)] text-[color:var(--brand)]">
+              <span class="font-[family-name:var(--font-display)] text-[13px] font-extrabold">{String(r.reportDate).slice(8, 10)}</span>
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <strong class="font-[family-name:var(--font-heading)] text-sm">{r.reportDate}</strong>
+                <span class="chip text-[10px]">{r.period}</span>
+                {r.emailSentAt ? <span class="chip chip-success text-[10px]">📧 terkirim</span> : <span class="chip text-[10px]">arsip</span>}
+                <Fragment set:html={pct(p, "clicks_pct")} />
+              </div>
+              {insight && <p class="mt-1 truncate text-xs text-[color:var(--text-muted)]">{insight}</p>}
+            </div>
+            <svg class="h-4 w-4 text-[color:var(--text-faint)] transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          </summary>
+          <div class="border-t border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/60 px-5 py-4">
+            <div class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+              <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{num(p, "clicks_y")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Klik</div></div>
+              <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{num(p, "articles_new")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Artikel baru</div></div>
+              <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{num(p, "submitted")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">URL submit</div></div>
+              <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{num(p, "cron_err")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Cron error</div></div>
+            </div>
           </div>
-          <div class="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            <div><span class="font-mono-num font-bold">{num(p, "clicks_y")}</span> <span class="text-slate-400">klik</span></div>
-            <div><span class="font-mono-num font-bold">{num(p, "articles_new")}</span> <span class="text-slate-400">artikel baru</span></div>
-            <div><span class="font-mono-num font-bold">{num(p, "submitted")}</span> <span class="text-slate-400">URL submit</span></div>
-            <div><span class="font-mono-num font-bold">{num(p, "cron_err")}</span> <span class="text-slate-400">cron error</span></div>
-          </div>
-        </div>
+        </details>
       );
     })}
   </div>
