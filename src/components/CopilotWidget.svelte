@@ -78,7 +78,7 @@
             </div>
             <p class="mt-1 text-xs leading-relaxed text-[color:var(--text-secondary)]">{a.detail}</p>
             <div class="mt-1.5 flex items-center gap-2">
-              <span class="text-[10px] font-semibold text-[color:var(--brand)]">Dampak: {a.impact}</span>
+              <span class="text-[10px] font-semibold" style={`color:${a.severity === "good" ? "var(--c-good)" : a.severity === "warn" ? "var(--c-bad)" : "var(--c-info)"}`}>Dampak: {a.impact}</span>
               {#if a.cta}
                 <a href={a.cta.href} class="btn btn-ghost !py-0.5 !px-2 text-[11px] font-semibold">{a.cta.label} →</a>
               {/if}

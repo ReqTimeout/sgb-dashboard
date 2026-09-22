@@ -139,11 +139,11 @@ try {
           <div class="mt-1 text-xs text-[color:var(--text-muted)]">Biaya: <strong>Rp0</strong> · CPC: <strong>Rp0</strong></div>
           <div class="mt-1 text-xs text-[color:var(--text-success)]">Seandainya beli klik sebanyak ini via Meta: {fmtRp(oClicks * 1500)}</div>
         </div>
-        <div class="rounded-lg border border-[color:var(--brand)]/30 bg-[color:var(--brand-soft)] p-4">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--brand)]">Berbayar (Meta)</div>
+        <div class="rounded-lg border border-[#0081fb]/30 p-4" style="background: rgb(0 129 251 / 0.06);">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.12em]" style="color:#0081fb">Berbayar (Meta)</div>
           <div class="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtInt(mClicks)} klik</div>
           <div class="mt-1 text-xs text-[color:var(--text-muted)]">Biaya: <strong>{fmtRp(mSpend)}</strong> · CPC: <strong>{fmtRp(cpc)}</strong></div>
-          <div class="mt-1 text-xs text-[color:var(--brand)]">CPA per chat: {mChats ? fmtRp(cpaChat) : "—"}</div>
+          <div class="mt-1 text-xs font-semibold" style={`color:${mChats > 0 && cpaChat <= 15000 ? "var(--c-good)" : "var(--c-bad)"}`}>CPA per chat: {mChats ? fmtRp(cpaChat) : "—"}</div>
         </div>
       </div>
       <p class="mt-3 text-sm text-[color:var(--text-secondary)]">
