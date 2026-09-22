@@ -106,7 +106,7 @@ const fmtDate = (ts: unknown) => {
     <StatCard label="Lead 30 hari" value={fmtInt(total)} hint="klik WhatsApp dari web" spark={days.map((d) => dayMap.get(d) ?? 0)} />
     <StatCard label="Lead HOT" value={String(scored.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length)} hint="skor ≥70 · tangani dulu" warn={scored.some((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru")} />
     <StatCard label="Deal tercatat" value={fmtRp(revTotal)} hint={`${byStatus("deal").length} deal · revenue per sumber di bawah`} />
-    <StatCard label="Perlu follow-up" value={String(urgent.length)} warn={urgent.length > 0} hint="BARU >12 jam · otomatis" />
+    <StatCard label="Perlu follow-up" value={String(urgent.length)} warn={urgent.length > 0} ok={urgent.length === 0 && total > 0} hint="BARU >12 jam · otomatis" />
   </div>
 
   <h2 id="kanban" class="mt-5 font-[family-name:var(--font-heading)] text-sm font-bold">Pipeline <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">diurut otomatis: skor tertinggi dulu</span></h2>
@@ -173,11 +173,11 @@ const fmtDate = (ts: unknown) => {
 
   <div class="card mt-4 p-4">
     <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Lead per hari</h2>
-    {total > 0 ? <BarChartLC data={days.map((d) => ({ label: d.slice(5), value: dayMap.get(d) ?? 0 }))} height={200} defaultColor="#25d366" /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
+    {total > 0 ? <BarChartLC data={days.map((d) => ({ label: d.slice(5), value: dayMap.get(d) ?? 0 }))} height={200} defaultColor="#25d366"  client:visible /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
   </div>
 
   <div class="card mt-4 p-4">
     <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Jam sibuk</h2>
-    {total > 0 ? <LineChartLC data={hours.map((v, h) => ({ date: `2026-01-01T${String(h).padStart(2, "0")}:00`, value: v }))} height={200} color="var(--brand)" /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
+    {total > 0 ? <LineChartLC data={hours.map((v, h) => ({ date: `2026-01-01T${String(h).padStart(2, "0")}:00`, value: v }))} height={200} color="var(--brand)"  client:visible /> : <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">Belum ada data.</p>}
   </div>
 </Base>

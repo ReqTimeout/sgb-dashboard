@@ -52,7 +52,7 @@
       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9.5 2 11 5.5 14.5 6.5 11.5 9 12 13 9.5 10.5 6 11.5 7 7.5 5 5zM18 14l1.5 3 3 1-3 1-1.5 3-1.5-3-3-1 3-1z"/></svg>
     </div>
     <div class="flex-1">
-      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-faint)]">AI Copilot — Pak Bos</div>
+      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-faint)]">AI Copilot</div>
       <div class="text-[11px] text-[color:var(--text-faint)]">Aksi spesifik dari data hari ini · {model || "loading"}</div>
     </div>
     {#if loading}
@@ -62,7 +62,7 @@
 
   {#if !loading && actions.length === 0}
     <div class="mt-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/60 p-4 text-sm text-[color:var(--text-muted)]">
-      Sampeyan, semua mesin jalan normal. Tidak ada aksi urgent hari ini.
+      Seluruh sistem beroperasi normal. Tidak ada tindakan mendesak hari ini.
     </div>
   {/if}
 

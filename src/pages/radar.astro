@@ -17,7 +17,7 @@ const libUrl = (q: string) => `https://www.facebook.com/ads/library/?active_stat
 <Base title="Competitor Radar" tenantName={tenant.name}>
   <p class="text-sm text-[color:var(--text-muted)]">
     {tenant.name} · pantau iklan aktif kompetitor — creative, copy, dan sejak kapan jalan.
-    <span class="chip chip-warning ml-2">API otomatis: menunggu akses Meta (langkah Bos, lihat bawah)</span>
+    <span class="chip chip-warning ml-2">API otomatis: menunggu akses Meta (panduan di bawah)</span>
   </p>
 
   <div class="mt-4 grid gap-3 lg:grid-cols-3">
@@ -57,7 +57,7 @@ const libUrl = (q: string) => `https://www.facebook.com/ads/library/?active_stat
         <div class="mt-3">
           <EmptyState
             title="Belum ada data iklan kompetitor"
-            message="Klik link Ad Library di samping untuk cek manual hari ini, atau aktifkan API otomatis (langkah Bos di bawah) agar halaman ini terisi sendiri tiap minggu."
+            message="Klik link Ad Library di samping untuk cek manual hari ini, atau aktifkan API otomatis (panduan di bawah) agar halaman ini terisi sendiri tiap minggu."
             mascot="search"
           />
         </div>
@@ -88,7 +88,7 @@ const libUrl = (q: string) => `https://www.facebook.com/ads/library/?active_stat
   </div>
 
   <div class="card mt-4 p-4 text-sm">
-    <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🔌 Cara aktifkan scan otomatis (langkah Bos, sekali saja)</h2>
+    <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🔌 Cara mengaktifkan pemindaian otomatis (satu kali saja)</h2>
     <ol class="mt-2 list-decimal space-y-1 pl-5 text-[color:var(--text-secondary)]">
       <li>Buka <a class="text-[color:var(--info)] hover:underline" href="https://www.facebook.com/ads/library/api" target="_blank" rel="noopener">facebook.com/ads/library/api ↗</a> → minta akses Ad Library API untuk aplikasi <strong>Beriklan API</strong>.</li>
       <li>Setelah disetujui, kabari agent — cron mingguan langsung mengisi tabel ini otomatis.</li>

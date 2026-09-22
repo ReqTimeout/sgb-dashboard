@@ -123,9 +123,9 @@ try {
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
     <StatCard label="Spend 30 hari (AKTIF)" value={fmtRp(mSpend)} hint="campaign berjalan saja" spark={spend.slice(-14).map((p) => p.value)} />
-    <StatCard label="Chat WA masuk" value={fmtInt(mChats)} hint="mulai percakapan" spark={chatStarted.slice(-14).map((p) => p.value)} />
-    <StatCard label="Chat dibalas" value={fmtInt(mReplied)} hint="customer benar-benar bales" />
-    <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"}`} />
+    <StatCard label="Chat WA masuk" value={fmtInt(mChats)} hint="mulai percakapan" spark={chatStarted.slice(-14).map((p) => p.value)} ok={mChats > 0} />
+    <StatCard label="Chat dibalas" value={fmtInt(mReplied)} hint="customer benar-benar bales" ok={mReplied > 0} />
+    <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"}`} warn={mChats > 0 && cpaChat > 15000} ok={mChats > 0 && cpaChat <= 15000} />
   </div>
 
   <!-- PERBANDINGAN ORGANIK VS IKLAN -->
@@ -147,7 +147,7 @@ try {
         </div>
       </div>
       <p class="mt-3 text-sm text-[color:var(--text-secondary)]">
-        <strong>Bos:</strong> mesin SEO Anda menghasilkan {fmtInt(oClicks)} klik gratis bulan ini. Berharga {fmtRp(oClicks * 1500)} kalau harus bayar. SEO + iklan saling melengkapi: SEO untuk jangka panjang, iklan untuk chat cepat.
+        <strong>Kesimpulan:</strong> mesin SEO menghasilkan {fmtInt(oClicks)} klik gratis bulan ini. Berharga {fmtRp(oClicks * 1500)} kalau harus bayar. SEO + iklan saling melengkapi: SEO untuk jangka panjang, iklan untuk chat cepat.
       </p>
     </div>
   )}
@@ -161,11 +161,11 @@ try {
       <div class="mt-3 grid gap-4 lg:grid-cols-2">
         <div>
           <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Spend harian (Rp)</div>
-          <BarChartLC data={spend.slice(-30).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={200} defaultColor="#0081fb" />
+          <BarChartLC data={spend.slice(-30).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={200} defaultColor="#0081fb"  client:visible />
         </div>
         <div>
           <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Chat WA masuk /hari</div>
-          <LineChartLC data={chatStarted.slice(-30)} height={200} color="#25D366" />
+          <LineChartLC data={chatStarted.slice(-30)} height={200} color="#25D366"  client:visible />
         </div>
       </div>
     ) : (
@@ -183,7 +183,7 @@ try {
     </div>
     <ul class="divide-y divide-[color:var(--border-subtle)]">
       {trackRows.map((t) => (
-        <li class="flex items-center gap-3 px-5 py-2.5 text-sm">
+        <li class="flex items-center gap-3 px-5 py-2.5 text-sm" style={t.ok ? "" : "background: rgb(239 68 68 / 0.06);"}>
           <span class="h-2 w-2 shrink-0 rounded-full" style={`background:${t.ok ? "var(--success)" : "var(--danger)"}`}></span>
           <span class="font-semibold">{t.label}</span>
           <span class="text-[color:var(--text-muted)]">{t.desc}</span>

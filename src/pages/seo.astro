@@ -82,11 +82,11 @@ const heroNarative = totClicks > 0
         <div class="grid gap-4 lg:grid-cols-2">
           <div>
             <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Klik /hari</div>
-            <LineChartLC data={clicks} height={220} color="var(--brand)" />
+            <LineChartLC data={clicks} height={220} color="var(--brand)"  client:visible />
           </div>
           <div>
             <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Tayang /hari</div>
-            <BarChartLC data={impr.map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={220} defaultColor="#94a3b8" />
+            <BarChartLC data={impr.map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={220} defaultColor="#94a3b8"  client:visible />
           </div>
         </div>
       ) : (

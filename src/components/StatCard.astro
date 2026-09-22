@@ -9,8 +9,9 @@ interface Props {
   hint?: string;
   spark?: number[];
   warn?: boolean;
+  ok?: boolean;
 }
-const { label, value, delta, deltaLabel, hint, spark, warn } = Astro.props;
+const { label, value, delta, deltaLabel, hint, spark, warn, ok } = Astro.props;
 const deltaPos = (delta ?? 0) > 0;
 const deltaNeg = (delta ?? 0) < 0;
 const deltaCls = warn
@@ -21,11 +22,24 @@ const deltaCls = warn
       ? "chip-danger"
       : "chip";
 const deltaSign = deltaPos ? "▲" : deltaNeg ? "▼" : "·";
+// Background menyala sesuai status: merah = perhatian, hijau = sehat
+const toneStyle = warn
+  ? "border-color: var(--danger); background: linear-gradient(135deg, rgb(239 68 68 / 0.10), transparent 70%);"
+  : ok
+    ? "border-color: var(--success); background: linear-gradient(135deg, rgb(16 185 129 / 0.10), transparent 70%);"
+    : "";
+const toneDot = warn ? "var(--danger)" : ok ? "var(--success)" : "var(--border-strong)";
 ---
-<div class="card relative p-4">
-  <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">{label}</div>
+<div class="card relative overflow-hidden p-4" style={toneStyle}>
+  {(warn || ok) && (
+    <span class="absolute left-0 top-0 h-full w-1" style={`background:${toneDot}`}></span>
+  )}
+  <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+    {(warn || ok) && <span class="h-1.5 w-1.5 rounded-full" style={`background:${toneDot}`}></span>}
+    {label}
+  </div>
   <div class="mt-1 flex items-baseline gap-2">
-    <span class="font-[family-name:var(--font-display)] text-[28px] font-extrabold leading-none tracking-tight">{value}</span>
+    <span class="font-[family-name:var(--font-display)] text-[28px] font-extrabold leading-none tracking-tight" style={warn ? "color: var(--danger);" : ok ? "color: var(--success);" : ""}>{value}</span>
     {delta !== undefined && (
       <span class:list={["chip", deltaCls, "text-[10px]"]}>
         <span>{deltaSign}{Math.abs(delta).toFixed(0)}%</span>
@@ -36,7 +50,7 @@ const deltaSign = deltaPos ? "▲" : deltaNeg ? "▼" : "·";
   {hint && <div class="mt-1 text-[11px] text-[color:var(--text-muted)]">{hint}</div>}
   {spark && spark.length > 1 && (
     <div class="mt-2 -mb-1 -mx-1">
-      <Sparkline values={spark} stroke={warn ? "var(--danger)" : "var(--brand)"} />
+      <Sparkline values={spark} stroke={warn ? "var(--danger)" : ok ? "var(--success)" : "var(--brand)"} />
     </div>
   )}
 </div>

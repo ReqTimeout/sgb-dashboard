@@ -82,7 +82,7 @@ const headline = hasData
     <div class="pointer-events-none absolute -top-24 -left-24 h-64 w-64 rounded-full" style="background: radial-gradient(circle, rgb(220 38 38 / 0.20), transparent 70%)"></div>
     <div class="relative z-10 grid gap-5 sm:grid-cols-[1fr_auto] sm:items-end">
       <div>
-        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">{greet()}, {user.role === "superadmin" ? "Pak Bos" : "Ibu"} 👋</div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">{greet()}</div>
         <div class="mt-2 text-display text-3xl sm:text-5xl">{tenant.name}</div>
         <p class="mt-3 max-w-xl text-base text-white/85">{headline}</p>
       </div>
@@ -106,7 +106,12 @@ const headline = hasData
     <div class="flex items-center gap-2 overflow-x-auto">
       <span class="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Channel</span>
       {channels.map((c) => (
-        <a href={c.href} class="flex shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--border-subtle)] px-2.5 py-1 text-xs transition-all hover:-translate-y-px hover:shadow-[var(--shadow-card)]">
+        <a href={c.href} class="flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-all hover:-translate-y-px hover:shadow-[var(--shadow-card)]"
+          style={!c.ok
+            ? "border-color: var(--border-subtle);"
+            : c.warn
+              ? "border-color: var(--warning); background: rgb(245 158 11 / 0.10);"
+              : "border-color: var(--success); background: rgb(16 185 129 / 0.10);"}>
           <span class="h-1.5 w-1.5 rounded-full" style={`background:${!c.ok ? "var(--text-faint)" : c.warn ? "var(--warning)" : "var(--success)"}`}></span>
           <strong>{c.label}</strong>
           <span class="text-[color:var(--text-muted)]">{c.note}</span>
@@ -133,7 +138,7 @@ const headline = hasData
     <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Insight minggu ini</div>
     <div class="mt-2 grid gap-3 sm:grid-cols-3 text-sm leading-relaxed">
       <p class="rounded-lg bg-[color:var(--bg-surface-2)]/60 p-3">
-        <strong class="text-[color:var(--text-primary)]">Sampeyan, SEO Anda jalan.</strong>{" "}
+        <strong class="text-[color:var(--text-primary)]">Performa SEO berjalan.</strong>{" "}
         <span class="text-[color:var(--text-secondary)]">
           {sum30 > 0
             ? `${fmtInt(sum30)} klik masuk dari Google 30 hari terakhir. Kalau pakai iklan, ini setara sekitar ${fmtRp(sum30 * 1500)} budget.`
@@ -173,11 +178,11 @@ const headline = hasData
         <div class="grid gap-3 lg:grid-cols-2">
           <div>
             <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Klik Google</div>
-            <AreaChartLC data={clicks.slice(-30)} height={160} />
+            <AreaChartLC data={clicks.slice(-30)} height={160}  client:visible />
           </div>
           <div>
             <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Lead WhatsApp</div>
-            <AreaChartLC data={sparkLeads.map((v, i) => ({ date: sparkLeads.length > 0 ? `d${i}` : `d${i}`, value: v }))} height={160} />
+            <AreaChartLC data={sparkLeads.map((v, i) => ({ date: sparkLeads.length > 0 ? `d${i}` : `d${i}`, value: v }))} height={160}  client:visible />
           </div>
         </div>
       ) : (
