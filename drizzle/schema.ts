@@ -192,9 +192,21 @@ export const keywordInventory = mysqlTable(
     source: varchar("source", { length: 64 }),
     city: varchar("city", { length: 64 }),
     intent: varchar("intent", { length: 32 }),
+    // S3: intelijen keyword — kolom tambahan, default null aman untuk data lama.
+    normalizedKeyword: varchar("normalized_keyword", { length: 255 }),     // dedupe key (alias applied + lowercase)
+    cluster: varchar("cluster", { length: 64 }),                            // kategori topikal: cat / keramik / besi / sanitary / listrik / tools / atap / lantai / pipa
+    opportunity: int("opportunity").notNull().default(0),                    // 0-99999 — skor GSC pos4-10 × impressions, fallback priority × intent_weight
+    suggestion: varchar("suggestion", { length: 255 }),                     // kalimat manusia: "Bikin artikel harga + FAQ ongkir"
+    impressionsLatest: int("impressions_latest").default(0),                 // backup terakhir dari GSC saat hitung opportunity
+    positionLatest: int("position_latest"),                                 // backup posisi terakhir
+    opportunityUpdatedAt: datetime("opportunity_updated_at"),                // kapan opportunity terakhir dihitung
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (t) => [uniqueIndex("uq_keyword").on(t.tenantId, t.keyword)],
+  (t) => [
+    uniqueIndex("uq_keyword").on(t.tenantId, t.keyword),
+    uniqueIndex("uq_normalized").on(t.tenantId, t.normalizedKeyword),
+    // Index untuk sorting opportunity cepat (gak perlu scan 1.300+ rows tiap render).
+  ],
 );
 
 export const notesInternal = mysqlTable("notes_internal", {
