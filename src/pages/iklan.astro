@@ -18,6 +18,8 @@ import { leadEvents } from "../../drizzle/schema";
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
+const { can: canDo } = await import("../lib/auth/session");
+const canAds = canDo(user, "iklan.action");
 
 // meta_ads channel = ACTIVE only (sesuai revisi meta-insights producer)
 const spend = await series(tenant.id, "meta_ads", "spend", 30);
@@ -224,7 +226,7 @@ try {
             </div>
             <div class="flex shrink-0 flex-wrap items-center gap-1.5">
               <a href={`https://sariglassbangunan.com/promo/${p.slug}/`} target="_blank" rel="noopener" class="btn !py-1 text-xs">Landing <Icon name="external-link" size="xs" class="ml-1" /></a>
-              {p.slug && <UtmCopy slug={p.slug} client:visible />}
+              {canAds && p.slug && <UtmCopy slug={p.slug} client:visible />}
             </div>
           </li>
           );
@@ -313,7 +315,7 @@ try {
               <div class="mt-0.5 text-[10px] text-[color:var(--text-faint)]">spend {fmtRp(t.spend)} · freq {t.freq.toFixed(1)} · ID {t.id}</div>
             </div>
             <div class="flex shrink-0 flex-wrap items-center gap-1.5">
-              <PauseAdModal ad={{ id: t.id, name: t.name, reason: t.reason, spend: t.spend, freq: t.freq }} hasToken={hasMetaToken} client:visible />
+              {canAds && <PauseAdModal ad={{ id: t.id, name: t.name, reason: t.reason, spend: t.spend, freq: t.freq }} hasToken={hasMetaToken} client:visible />}
               <a href={`https://adsmanager.facebook.com/adsmanager/manage/adset?act=3386380068089099&selected_adset_ids=${t.id}`} target="_blank" rel="noopener" title="Buka di Ads Manager" class="btn shrink-0 !py-1 text-xs">Ads Manager <Icon name="external-link" size="xs" class="ml-1" /></a>
             </div>
           </li>

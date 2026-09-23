@@ -3,11 +3,20 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestMetric } from "../lib/data";
 import { fmtInt } from "../lib/insights";
+import { getDb } from "../lib/db";
+import { auditLog } from "../../drizzle/schema";
+import { desc } from "drizzle-orm";
 
 const user = Astro.locals.user!;
 if (user.role !== "superadmin") throw new Error("Khusus agency");
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, true);
 if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+// S8: 20 aktivitas terakhir dari audit_log (semua aksi tulis dashboard).
+let recentAudit: { actor: string; action: string; target: string | null; ts: Date }[] = [];
+try {
+  recentAudit = await getDb().select({ actor: auditLog.actor, action: auditLog.action, target: auditLog.target, ts: auditLog.ts }).from(auditLog).orderBy(desc(auditLog.id)).limit(20);
+} catch { /* tabel belum ada = tampilkan kosong */ }
 
 const okRuns = await latestMetric(tenant.id, "system", "cron_ok_24h");
 const errRuns = await latestMetric(tenant.id, "system", "cron_err_24h");
@@ -101,5 +110,25 @@ const roleColor: Record<string, string> = {
       })}
     </ul>
     <p class="border-t border-[color:var(--border-subtle)] px-5 py-3 text-[11px] text-[color:var(--text-faint)]">Status diambil live dari admin tiap buka halaman. Detail penuh di admin Sari Glass (<code class="rounded bg-[color:var(--bg-surface-2)] px-1">cron_runs</code>).</p>
+  </div>
+
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Aktivitas terakhir <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">semua aksi tulis dashboard · audit_log</span></h2>
+      <span class="chip text-[10px]">{recentAudit.length} baris</span>
+    </div>
+    {recentAudit.length === 0 ? (
+      <p class="px-5 py-6 text-center text-sm text-[color:var(--text-faint)]">Belum ada aktivitas tercatat — aksi tulis (deal, bulk, pause, UTM, share, notes, radar) muncul di sini otomatis.</p>
+    ) : (
+    <ul class="divide-y divide-[color:var(--border-subtle)]">
+      {recentAudit.map((a) => (
+        <li class="flex items-center gap-3 px-5 py-2 text-sm">
+          <span class="font-[family-name:var(--font-mono-num)] text-[11px] text-[color:var(--text-faint)]">{String(a.ts).slice(5, 16).replace("T", " ")}</span>
+          <span class="min-w-0 flex-1 truncate"><strong class="font-mono text-[11px]">{a.action}</strong> <span class="text-[color:var(--text-muted)]">· {a.target ?? "—"}</span></span>
+          <span class="shrink-0 truncate text-[11px] text-[color:var(--text-faint)]">{a.actor}</span>
+        </li>
+      ))}
+    </ul>
+    )}
   </div>
 </Base>

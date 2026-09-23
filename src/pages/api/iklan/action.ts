@@ -40,6 +40,8 @@ export const GET: APIRoute = async ({ url, locals }) => {
 export const POST: APIRoute = async ({ request, locals, url }) => {
   const me = locals.user;
   if (!me) return new Response("Unauthorized", { status: 401 });
+  const { can } = await import("../../../lib/auth/session");
+  if (!can(me, "iklan.action")) return new Response("Forbidden: hanya agency.", { status: 403 });
   const tenant = await getRequestTenant(url.host, "/iklan", new URLSearchParams(), me.role === "superadmin");
   const form = await request.formData().catch(() => null);
   const action = String(form?.get("action") ?? "pause");

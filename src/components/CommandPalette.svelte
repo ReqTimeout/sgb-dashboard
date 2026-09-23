@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  interface Item { href: string; label: string; group: string; }
+  interface Item { href: string; label: string; group: string; superadmin?: boolean; }
+  interface Props { role?: string }
+  let { role = "viewer" }: Props = $props();
 
   const items: Item[] = [
     { group: "Ringkasan", label: "Pagi ini", href: "/" },
@@ -11,13 +13,15 @@
     { group: "SEO", label: "Keyword", href: "/keywords" },
     { group: "Iklan", label: "Performa Iklan", href: "/iklan" },
     { group: "Iklan", label: "ROI", href: "/roi" },
-    { group: "Iklan", label: "Radar Kompetitor", href: "/radar" },
+    { group: "Iklan", label: "Radar Kompetitor", href: "/radar", superadmin: true },
     { group: "Lead", label: "Pipeline", href: "/leads" },
     { group: "Lead", label: "Laporan", href: "/laporan" },
     { group: "Sistem", label: "AI Search", href: "/ai" },
-    { group: "Sistem", label: "HQ", href: "/hq" },
-    { group: "Sistem", label: "Health", href: "/health" },
+    { group: "Sistem", label: "HQ", href: "/hq", superadmin: true },
+    { group: "Sistem", label: "Health", href: "/health", superadmin: true },
   ];
+  // S8: sembunyikan halaman agency dari palette non-superadmin (server tetap guard).
+  const visible = $derived(role === "superadmin" ? items : items.filter((it) => !it.superadmin));
 
   let open = $state(false);
   let q = $state("");
@@ -26,8 +30,8 @@
 
   const filtered = $derived(
     q
-      ? items.filter((it) => (it.label + it.href).toLowerCase().includes(q.toLowerCase())).slice(0, 8)
-      : items.slice(0, 8),
+      ? visible.filter((it) => (it.label + it.href).toLowerCase().includes(q.toLowerCase())).slice(0, 8)
+      : visible.slice(0, 8),
   );
 
   function show() {

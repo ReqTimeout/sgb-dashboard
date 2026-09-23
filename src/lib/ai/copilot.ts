@@ -1,9 +1,9 @@
 // AI Copilot rule-based — analisa data GSC + Meta + WA + pipeline → 3 aksi konkret.
 // Bisa di-upgrade ke MiniMax via GMI API kalau GMI_API_KEY di-set; default fallback rule.
 // Bahasa output: Indonesia profesional retail — langsung ke inti, tanpa sapaan.
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { leadEvents, dailyMetrics } from "../../../drizzle/schema";
+import { leadEvents, dailyMetrics, articlesView, rankSnapshots } from "../../../drizzle/schema";
 
 export interface CopilotAction {
   id: string;
@@ -13,6 +13,15 @@ export interface CopilotAction {
   impact: string;
   cta?: { label: string; href: string };
   severity: "info" | "warn" | "good";
+}
+
+// S8: alert ringan untuk bell notifikasi — turunan dari rule-engine yang sama.
+// severity "warn" = badge merah; klik → deep-link ke halaman terkait.
+export interface CopilotAlert {
+  id: string;
+  title: string;
+  href: string;
+  severity: "warn" | "info" | "good";
 }
 
 function todayISO(offsetDays = 0): string {
@@ -32,9 +41,11 @@ function fmtRp(n: number): string {
   return `Rp${(n / 1_000_000).toFixed(1)}jt`;
 }
 
-export async function generateCopilot(tenantId: number): Promise<{ actions: CopilotAction[]; model: string }> {
+export async function generateCopilot(tenantId: number): Promise<{ actions: CopilotAction[]; alerts: CopilotAlert[]; model: string }> {
   const db = getDb();
   const actions: CopilotAction[] = [];
+  const alerts: CopilotAlert[] = [];
+  const pushAlert = (a: CopilotAlert) => { if (alerts.length < 5 && !alerts.some((x) => x.id === a.id)) alerts.push(a); };
 
   const since1 = new Date(); since1.setUTCDate(since1.getUTCDate() - 1);
   const since2 = new Date(); since2.setUTCDate(since2.getUTCDate() - 2);
@@ -82,6 +93,7 @@ export async function generateCopilot(tenantId: number): Promise<{ actions: Copi
       cta: { label: "Lihat peluang", href: "/seo" },
       severity: "warn",
     });
+    pushAlert({ id: "seo-decline", title: `Klik turun ${Math.abs(seoTrend).toFixed(0)}% minggu ini`, href: "/seo", severity: "warn" });
   }
   if (avgPos != null && avgPos > 10 && avgPos < 30) {
     actions.push({
@@ -116,6 +128,7 @@ export async function generateCopilot(tenantId: number): Promise<{ actions: Copi
       cta: { label: "Lihat audit Meta", href: "/iklan" },
       severity: "warn",
     });
+    pushAlert({ id: "ads-cpa-high", title: `CPA ${fmtRp(cpaChat)}/chat — mahal`, href: "/iklan", severity: "warn" });
   }
   if (cpaChat > 0 && cpaChat <= 15000) {
     actions.push({
@@ -140,6 +153,7 @@ export async function generateCopilot(tenantId: number): Promise<{ actions: Copi
       cta: { label: "Buka pipeline", href: "/leads" },
       severity: "warn",
     });
+    pushAlert({ id: "lead-stuck", title: `${stuckCount} lead belum dibalas`, href: "/leads", severity: "warn" });
   }
   if (stuckCount === 0) {
     actions.push({
@@ -164,8 +178,36 @@ export async function generateCopilot(tenantId: number): Promise<{ actions: Copi
     });
   }
 
+  // S8: alert positif/operasional untuk bell (di luar action list utama).
+  try {
+    const today = todayISO(0);
+    // Deal baru 24 jam terakhir
+    const deals = await db
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(leadEvents)
+      .where(and(eq(leadEvents.tenantId, tenantId), eq(leadEvents.status, "deal"), gte(leadEvents.ts, since1)));
+    const dealN = Number(deals[0]?.n ?? 0);
+    if (dealN > 0) pushAlert({ id: "deal-new", title: `${dealN} deal baru 24 jam terakhir`, href: "/leads", severity: "good" });
+    // Artikel terbit hari ini
+    const arts = await db
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(articlesView)
+      .where(and(eq(articlesView.tenantId, tenantId), gte(articlesView.publishedAt, new Date(`${today}T00:00:00`))));
+    const artN = Number(arts[0]?.n ?? 0);
+    if (artN > 0) pushAlert({ id: "article-today", title: `${artN} artikel terbit hari ini`, href: "/konten", severity: "info" });
+    // Keyword TOP3 hari ini (snapshot terbaru)
+    const top3 = await db
+      .select({ n: sql<number>`COUNT(DISTINCT ${rankSnapshots.keyword})` })
+      .from(rankSnapshots)
+      .where(and(eq(rankSnapshots.tenantId, tenantId), eq(rankSnapshots.date, today), lte(rankSnapshots.position, 3)));
+    const top3N = Number(top3[0]?.n ?? 0);
+    if (top3N > 0) pushAlert({ id: "top3", title: `${top3N} keyword di TOP3 Google`, href: "/ranking", severity: "good" });
+  } catch { /* alert opsional — jangan gagalkan copilot */ }
+
   const sevOrder = { warn: 0, info: 1, good: 2 };
   actions.sort((a, b) => sevOrder[a.severity] - sevOrder[b.severity]);
+  const sevAlert = { warn: 0, info: 1, good: 2 };
+  alerts.sort((a, b) => sevAlert[a.severity] - sevAlert[b.severity]);
 
-  return { actions: actions.slice(0, 5), model: "rule-engine-v1" };
+  return { actions: actions.slice(0, 5), alerts: alerts.slice(0, 5), model: "rule-engine-v1" };
 }

@@ -19,6 +19,8 @@ const realized = (r: { status: string | null; dealValue: number | null; sc: { es
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
+const { can: canDo } = await import("../lib/auth/session");
+const canDeal = canDo(user, "pipeline.update");
 const db = getDb();
 const since = new Date();
 since.setUTCDate(since.getUTCDate() - 30);
@@ -241,7 +243,7 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
           <span class="hidden font-[family-name:var(--font-mono-num)] text-xs font-bold text-[color:var(--success)] sm:inline">
             {(r.status ?? "baru") === "deal" && r.dealValue && r.dealValue > 0 ? fmtRpShort(r.dealValue) : `≈${fmtRpShort(r.sc.estValue)}`}
           </span>
-          {(r.status ?? "baru") !== "deal" && (r.status ?? "baru") !== "batal" && (
+          {canDeal && (r.status ?? "baru") !== "deal" && (r.status ?? "baru") !== "batal" && (
             <form method="post" action="/api/pipeline/update">
               <input type="hidden" name="id" value={r.id} />
               <button name="status" value="deal" type="submit" title="Tandai deal (nilai otomatis dari estimasi)" class="btn shrink-0 !py-1 !text-[11px]">✓ Deal</button>

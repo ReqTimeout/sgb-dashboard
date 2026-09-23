@@ -1,4 +1,8 @@
 // GET /api/pipeline/stale — D3.4 helper. Public (tidak butuh session) untuk admin cron anomaly.
+// S8 TODO(multi-tenant): bila tenant ke-2+ aktif, endpoint ini bocor antar-klien
+// (hitung SEMUA tenant tanpa filter). Saat itu tiba: tambah `?tenant=` wajib +
+// validasi X-Ingest-Key per tenant (pola api/ingest/*), atau pindah ke session.
+// Sekarang single-client (sariglass saja) → low-risk, biarkan public.
 import type { APIRoute } from "astro";
 import { getDb } from "../../../lib/db";
 

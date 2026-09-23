@@ -40,9 +40,10 @@ const Body = z.object({
 });
 
 export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
-  const { validateSession, SESSION_COOKIE } = await import("../../../lib/auth/session");
+  const { validateSession, SESSION_COOKIE, can } = await import("../../../lib/auth/session");
   const me = await validateSession(cookies.get(SESSION_COOKIE)?.value ?? "");
   if (!me) return new Response("Unauthorized", { status: 401 });
+  if (!can(me, "pipeline.update")) return new Response("Forbidden: role Anda read-only.", { status: 403 });
 
   const form = await request.formData().catch(() => null);
   const rawDV = form?.get("deal_value");
@@ -90,6 +91,14 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
       })
       .where(eq(leadEvents.id, parsed.data.id));
 
+    const { logAudit } = await import("../../../lib/audit");
+    await logAudit({
+      tenantId: tenant?.id ?? null,
+      actor: me.email,
+      action: `pipeline.status.${newStatus}`,
+      target: `lead ${parsed.data.id}${newStatus === "deal" && dealValue ? ` · Rp${dealValue.toLocaleString("id-ID")}` : ""}`,
+    });
+
     // D2.3 Offline conversion loop — kirim Meta CAPI Purchase kalau lead di-deal.
     // Ini melatih Meta belajar "lead mana yang berkualitas", bukan cuma yang klik.
     if (newStatus === "deal" && dealValue && dealValue > 0) {
@@ -104,7 +113,7 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
         ua,
       }).catch((e) => console.error("[pipeline] meta OC:", String(e).slice(0, 200)));
     }
-  } catch (e) {
+    } catch (e) {
     console.error("[pipeline]", e);
     return new Response("Gagal menyimpan", { status: 500 });
   }

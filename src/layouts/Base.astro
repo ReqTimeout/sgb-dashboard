@@ -6,6 +6,7 @@ import "@fontsource/geist-mono";
 import "../styles/global.css";
 import Sidebar from "../components/Sidebar.astro";
 import CommandPalette from "../components/CommandPalette.svelte";
+import NotifBell from "../components/NotifBell.svelte";
 import { Toaster } from "svelte-sonner";
 
 interface Props {
@@ -57,13 +58,8 @@ const current = Astro.url.pathname;
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <CommandPalette client:load />
-            <button class="btn btn-ghost relative h-9 w-9 justify-center px-0" aria-label="Notifikasi" title="Notifikasi">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9m5 13a2 2 0 0 0 4 0"/></svg>
-              {alertCount > 0 && (
-                <span class="absolute -right-0.5 -top-0.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-[color:var(--danger)] px-1 text-[9px] font-bold text-white">{alertCount}</span>
-              )}
-            </button>
+            <CommandPalette client:load role={user?.role ?? "viewer"} />
+            <NotifBell client:load />
           </div>
         </header>
 

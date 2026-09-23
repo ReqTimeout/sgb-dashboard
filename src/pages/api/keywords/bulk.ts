@@ -5,13 +5,13 @@ import type { APIRoute } from "astro";
 import { inArray } from "drizzle-orm";
 import { getDb } from "../../../lib/db";
 import { keywordInventory } from "../../../../drizzle/schema";
-import { validateSession, SESSION_COOKIE } from "../../../lib/auth/session";
+import { validateSession, SESSION_COOKIE, can } from "../../../lib/auth/session";
 import { logAudit } from "../../../lib/audit";
 
 export const POST: APIRoute = async ({ request, cookies, url }) => {
   const me = await validateSession(cookies.get(SESSION_COOKIE)?.value ?? "");
   if (!me) return new Response("Unauthorized", { status: 401 });
-  if (me.role !== "superadmin") {
+  if (!can(me, "keywords.bulk")) {
     return new Response("Hanya superadmin yang boleh bulk edit keyword.", { status: 403 });
   }
 

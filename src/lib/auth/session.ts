@@ -1,4 +1,4 @@
-// Session auth SGB Dashboard — copy pola sariglass-admin (bcryptjs pure JS,
+// Session auth Beriklan Dashboard — copy pola sariglass-admin (bcryptjs pure JS,
 // tanpa native binding). Role: superadmin (Bos, lintas tenant) + client_admin/viewer.
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
@@ -28,6 +28,25 @@ function randomId(bytes = 32): string {
 }
 
 export type UserRole = "superadmin" | "client_admin" | "viewer";
+
+// S8: matriks izin tulis (spec C10). Guard SERVER di setiap endpoint POST —
+// jangan cuma hide UI. viewer = read-only murni; client_admin = operasional
+// pipeline + share link saja; sisanya superadmin.
+export type WriteAction =
+  | "pipeline.update"   // tandai deal/dibalas/batal — client_admin boleh
+  | "share.create"      // buat share link — client_admin boleh
+  | "notes.create"      // catatan internal agency — superadmin saja
+  | "radar.watch"       // tambah/hapus pantauan kompetitor — superadmin saja
+  | "iklan.action"      // pause ads / log UTM — superadmin saja
+  | "keywords.bulk";    // bulk edit keyword — superadmin saja
+
+export function can(user: { role: UserRole } | null | undefined, action: WriteAction): boolean {
+  if (!user) return false;
+  if (user.role === "superadmin") return true;
+  if (user.role === "viewer") return false;
+  // client_admin: hanya operasional harian
+  return action === "pipeline.update" || action === "share.create";
+}
 
 export interface SessionUser {
   id: number;

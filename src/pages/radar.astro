@@ -8,6 +8,8 @@ import { getDb } from "../lib/db";
 import { competitorAds, competitorWatch } from "../../drizzle/schema";
 
 const user = Astro.locals.user!;
+// S8: radar khusus agency — client_admin/viewer tidak boleh buka halaman ini.
+if (user.role !== "superadmin") throw new Error("Khusus agency");
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 const db = getDb();
