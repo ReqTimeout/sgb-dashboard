@@ -2,7 +2,9 @@ import { defineMiddleware } from "astro:middleware";
 import { SESSION_COOKIE, validateSession } from "./lib/auth/session";
 
 // Publik: login + API auth + ingest (auth via X-Ingest-Key sendiri) + health + cron (auth via ?token sendiri).
-const PUBLIC_PREFIXES = ["/login", "/api/auth/", "/api/ingest/", "/api/health", "/api/cron/", "/api/pipeline/", "/api/audit/", "/api/copilot/", "/api/iklan/"];
+// S7: /api/iklan/ SENGAJA tidak publik — action.ts butuh locals.user (session) untuk
+// audit_log actor + guard login. (Sebelumnya publik → locals.user selalu null → 401 permanen.)
+const PUBLIC_PREFIXES = ["/login", "/api/auth/", "/api/ingest/", "/api/health", "/api/cron/", "/api/pipeline/", "/api/audit/", "/api/copilot/"];
 
 // CSRF sendiri (pengganti Astro checkOrigin yang dimatikan di astro.config.mjs):
 // request non-GET harus punya Origin/Referer cocok APP_URL. Tanpa header (curl/ops) diizinkan.
