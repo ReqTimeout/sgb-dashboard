@@ -43,7 +43,7 @@ const mCpa7 = mChats7 > 0 ? mSpend7 / mChats7 : 0;
 const channels = [
   { href: "/seo", label: "SEO", ok: sum7 > 0, warn: (d.pct ?? 0) < -10, note: sum7 > 0 ? `${fmtInt(sum7)} klik/7h` : "belum ada klik" },
   { href: "/iklan", label: "Meta", ok: mSpend7 > 0, warn: mCpa7 > 15000, note: mSpend7 > 0 ? `${fmtRp(mCpa7)}/chat` : "tidak ada spend" },
-  { href: "/iklan", label: "Google", ok: gSpend7 > 0, warn: false, note: gSpend7 > 0 ? `${fmtRp(gSpend7)}/7h` : "belum jalan (P9)" },
+  { href: "/iklan", label: "Google", ok: gSpend7 > 0, warn: false, note: gSpend7 > 0 ? `${fmtRp(gSpend7)}/7h` : "menunggu perintah Bos" },
   { href: "/leads", label: "WA", ok: staleOldN === 0, warn: staleOldN > 0, note: staleOldN > 0 ? `${staleOldN} mendesak` : "pipeline bersih" },
   { href: "/konten", label: "Konten", ok: (pub?.value ?? 0) > 0, warn: false, note: pub24?.value ? `+${fmtInt(pub24.value)} kemarin` : `${fmtInt(pub?.value ?? 0)} total` },
 ];

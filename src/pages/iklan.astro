@@ -6,8 +6,11 @@ import LineChartLC from "../components/LineChartLC.svelte";
 import EmptyState from "../components/EmptyState.astro";
 import Icon from "../components/Icon.astro";
 import InfoHint from "../components/InfoHint.astro";
+import UtmCopy from "../components/UtmCopy.svelte";
+import PauseAdModal from "../components/PauseAdModal.svelte";
 import { getRequestTenant, series, sumRange } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
+import { scoreLead } from "../lib/ai/lead-score";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import { leadEvents } from "../../drizzle/schema";
@@ -37,7 +40,8 @@ const cpaReply = mReplied > 0 ? Math.round(mSpend / mReplied) : 0;
 const cpc = mClicks > 0 ? Math.round(mSpend / mClicks) : 0;
 const hasAny = mSpend + mChats + mClicks > 0 || gSpend > 0;
 
-// D6.5: promo aktif dari public promo.json (untuk kartu + lead filter)
+// D6.5 + S7: promo aktif dari public promo.json (untuk kartu + lead filter)
+// S7: tiap promo dilengkapi status chip (lead masuk?) + jumlah lead + estValue + tombol salin UTM.
 interface PromoLite { slug?: string; label: string; pct: number; priceMin: number; originalPrice: number; endsAt: string; image?: string; theme?: string; }
 let promosActive: PromoLite[] = [];
 try {
@@ -47,6 +51,8 @@ try {
     promosActive = Array.isArray(j.items) ? j.items : [];
   }
 } catch { promosActive = []; }
+
+
 
 // TRACKING HEALTH: gateway + CAPI events + dedupe + GTM live verify
 const tdb = getDb();
@@ -85,6 +91,30 @@ const trackRows = [
   { label: "GTM container", desc: "GTM-WQ2BFWVL", ok: gtmOk, note: gtmOk ? "Pixel+GA4 live di container" : "tidak terverifikasi" },
 ];
 const trackOkCount = trackRows.filter((r) => r.ok).length;
+
+// S7: lead per promo — match pageUrl mengandung /promo/{slug} (30 hari, konsisten dgn /leads).
+// Dihitung di sini (bukan per-promo query) supaya 1 roundtrip untuk semua slug.
+const since30 = new Date();
+since30.setUTCDate(since30.getUTCDate() - 30);
+const promoLeadRows = await tdb
+  .select({ pageUrl: leadEvents.pageUrl, status: leadEvents.status, dealValue: leadEvents.dealValue, source: leadEvents.source, ts: leadEvents.ts })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, since30)))
+  .limit(500);
+interface PromoStat { n: number; est: number }
+const promoStats = new Map<string, PromoStat>();
+for (const p of promosActive) {
+  if (!p.slug) continue;
+  const hit = promoLeadRows.filter((r) => (r.pageUrl ?? "").includes(`/promo/${p.slug}`) && (r.status ?? "baru") !== "batal");
+  const est = hit.reduce((a, r) => {
+    const sc = scoreLead({ pageUrl: r.pageUrl, source: r.source, ts: r.ts, status: r.status });
+    return a + (r.status === "deal" ? (r.dealValue || sc.estValue) : sc.estValue);
+  }, 0);
+  promoStats.set(p.slug, { n: hit.length, est });
+}
+
+// S7: META_TOKEN ada? → tombol pause real; kalau tidak → fallback mailto agency.
+const hasMetaToken = Boolean(process.env.META_TOKEN);
 
 // D4.4: tarik rekomendasi kreatif dari cron terakhir
 let creativeTired: { id: string; name: string; reason: string; spend: number; freq: number }[] = [];
@@ -173,18 +203,32 @@ try {
         <span class="chip chip-success text-[10px]">{promosActive.length} live</span>
       </div>
       <ul class="divide-y divide-[color:var(--border-subtle)]">
-        {promosActive.slice(0, 6).map((p) => (
-          <li class="flex items-center gap-3 px-5 py-2.5 text-sm">
-            {p.image && <img src={`https://sariglassbangunan.com${p.image}`} alt="" width="40" height="40" loading="lazy" class="h-10 w-10 rounded-lg object-cover" />}
+        {promosActive.slice(0, 6).map((p) => {
+          const st = (p.slug && promoStats.get(p.slug)) || { n: 0, est: 0 };
+          return (
+          <li class="flex flex-col gap-2 px-5 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
+            {p.image && <img src={`https://sariglassbangunan.com${p.image}`} alt="" width="40" height="40" loading="lazy" class="h-10 w-10 shrink-0 rounded-lg object-cover" />}
             <div class="min-w-0 flex-1">
-              <div class="truncate font-semibold">{p.label}</div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="truncate font-semibold">{p.label}</span>
+                {st.n > 0
+                  ? <span class="chip chip-success shrink-0 !text-[9px]">ada lead masuk</span>
+                  : <span class="chip shrink-0 !text-[9px]">belum diiklankan</span>}
+              </div>
               <div class="text-[11px] text-[color:var(--text-muted)]">{fmtRp(p.originalPrice)} → <strong class="text-[color:var(--danger)]">{fmtRp(p.priceMin)}</strong> (−{p.pct}%) · s/d {p.endsAt.slice(0, 10)}</div>
+              <div class="text-[11px] text-[color:var(--text-faint)]">
+                {st.n > 0
+                  ? <>{fmtInt(st.n)} lead dari landing ini · potensi {fmtRp(st.est)} · <a href={`/leads?promo=${p.slug}`} class="text-[color:var(--info)] hover:underline">lihat di /leads →</a></>
+                  : <>belum ada lead dari landing ini (30 hari)</>}
+              </div>
             </div>
-            <div class="flex shrink-0 flex-col items-end gap-1">
+            <div class="flex shrink-0 flex-wrap items-center gap-1.5">
               <a href={`https://sariglassbangunan.com/promo/${p.slug}/`} target="_blank" rel="noopener" class="btn !py-1 text-xs">Landing <Icon name="external-link" size="xs" class="ml-1" /></a>
+              {p.slug && <UtmCopy slug={p.slug} client:visible />}
             </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   )}
@@ -229,7 +273,7 @@ try {
         </div>
       </div>
     ) : (
-      <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — campaign P9 belum jalan. Producer sudah siap.</p>
+      <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Siap aktif — campaign pertama menunggu perintah Bos. (Producer GA4 import sudah siap.)</p>
     )}
   </div>
 
@@ -254,21 +298,24 @@ try {
           <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
             <Icon name="settings" size="sm" strokeWidth={1.75} />
             Rekomendasi kreatif
-            <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">read-only · disetujui manual di UI Meta</span>
+            <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">jeda langsung dari sini (dry-run dulu) · tercatat di audit_log</span>
           </h2>
           <p class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">Dari cron creative-fatigue · {creativeTired.length} adset butuh perhatian</p>
         </div>
-        <span class="chip chip-warning text-[10px]">TIDAK otomatis</span>
+        <span class="chip chip-warning text-[10px]">konfirmasi 2 langkah</span>
       </div>
       <ul class="divide-y divide-[color:var(--border-subtle)]">
         {creativeTired.map((t) => (
-          <li class="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
+          <li class="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
             <div class="flex-1 min-w-0">
               <div class="truncate text-sm font-semibold">{t.name}</div>
               <div class="mt-0.5 text-[11px] text-[color:var(--text-muted)]">{t.reason}</div>
-              <div class="mt-0.5 text-[10px] text-[color:var(--text-faint)]">spend {fmtRp(t.spend)} · freq {t.freq.toFixed(1)}</div>
+              <div class="mt-0.5 text-[10px] text-[color:var(--text-faint)]">spend {fmtRp(t.spend)} · freq {t.freq.toFixed(1)} · ID {t.id}</div>
             </div>
-            <a href={`https://adsmanager.facebook.com/adsmanager/manage/adset?act=3386380068089099&selected_adset_ids=${t.id}`} target="_blank" rel="noopener" class="btn shrink-0 !py-1 text-xs">Setujui manual ↗</a>
+            <div class="flex shrink-0 flex-wrap items-center gap-1.5">
+              <PauseAdModal ad={{ id: t.id, name: t.name, reason: t.reason, spend: t.spend, freq: t.freq }} hasToken={hasMetaToken} client:visible />
+              <a href={`https://adsmanager.facebook.com/adsmanager/manage/adset?act=3386380068089099&selected_adset_ids=${t.id}`} target="_blank" rel="noopener" title="Buka di Ads Manager" class="btn shrink-0 !py-1 text-xs">Ads Manager <Icon name="external-link" size="xs" class="ml-1" /></a>
+            </div>
           </li>
         ))}
       </ul>
@@ -354,7 +401,7 @@ try {
   {gSpend > 0 ? (
     <div class="card mt-4 p-5">
       <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Google Ads <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">{fmtRp(gSpend)} spend 30h</span></h2>
-      <p class="mt-2 text-sm text-[color:var(--text-muted)]">Aktif sejak P9 dijalankan. Konversi via GA4 import sudah live.</p>
+      <p class="mt-2 text-sm text-[color:var(--text-muted)]">Siap aktif — campaign pertama menunggu perintah Bos. Konversi via GA4 import sudah live.</p>
     </div>
   ) : (
     <div class="card mt-4 flex items-start gap-3 p-4" style="background: linear-gradient(135deg, rgb(245 158 11 / 0.06), transparent);">
@@ -365,7 +412,7 @@ try {
         <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--warning)]">Google Ads siap aktif</div>
         <p class="mt-1 flex items-start gap-2 text-sm text-[color:var(--text-secondary)]">
           <Icon name="info" size="xs" class="mt-0.5 shrink-0 text-[color:var(--warning)]" />
-          Tracker GA4 sudah terpasang — data {fmtRp(gSpend)} spend akan masuk otomatis begitu campaign pertama jalan. Tidak ada campaign yang dibuat otomatis; menunggu perintah Bos untuk aktivasi (P9).
+          Tracker GA4 sudah terpasang — data {fmtRp(gSpend)} spend akan masuk otomatis begitu campaign pertama jalan. Siap aktif — campaign pertama menunggu perintah Bos; tidak ada campaign yang dibuat otomatis.
         </p>
       </div>
     </div>

@@ -31,6 +31,22 @@ const rows = await db
   .limit(200);
 const total = rows.length;
 
+// S7: filter "Dari promo" — ?promo={slug}, match pageUrl ~/promo/{slug}.
+// Daftar slug valid diambil dari promo.json toko (sama seperti /iklan).
+interface PromoChip { slug: string; label: string }
+let promoChips: PromoChip[] = [];
+try {
+  const r = await fetch("https://sariglassbangunan.com/data/promo.json", { signal: AbortSignal.timeout(8000) });
+  if (r.ok) {
+    const j = await r.json();
+    const items = Array.isArray(j.items) ? j.items : [];
+    promoChips = items.filter((p: { slug?: string }) => p.slug).map((p: { slug: string; label: string }) => ({ slug: p.slug, label: p.label }));
+  }
+} catch { promoChips = []; }
+const promoParam = Astro.url.searchParams.get("promo") ?? "";
+const promoActive = promoChips.some((p) => p.slug === promoParam) ? promoParam : "";
+const inPromo = (u: string | null) => !!promoActive && (u ?? "").includes(`/promo/${promoActive}`);
+
 // Kanalisasi sumber → channel (otomatis, tanpa input)
 function toChannel(raw: string | null, pageUrl: string | null = null): string {
   const s = `${raw ?? ""} ${(pageUrl ?? "").toLowerCase()}`;
@@ -46,7 +62,8 @@ const scored = rows.map((r) => ({
   channel: toChannel(r.source, r.pageUrl),
   sc: scoreLead({ pageUrl: r.pageUrl, source: r.source, ts: r.ts, status: r.status }),
 }));
-const queue = [...scored]
+const queueBase = promoActive ? scored.filter((r) => inPromo(r.pageUrl)) : scored;
+const queue = [...queueBase]
   .filter((r) => (r.status ?? "baru") !== "batal")
   .sort((a, b) => b.sc.score - a.sc.score)
   .slice(0, 20);
@@ -187,10 +204,23 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
     ))}
   </div>
 
+  <!-- S7: FILTER DARI PROMO (?promo=slug, match pageUrl ~/promo/slug) -->
+  {promoChips.length > 0 && (
+    <div class="mt-4 flex flex-wrap items-center gap-1.5">
+      <span class="text-[11px] font-semibold text-[color:var(--text-muted)]">Dari promo:</span>
+      <a href="/leads" class:list={["chip !text-[10px]", !promoActive ? "chip-success" : ""]}>semua</a>
+      {promoChips.map((p) => (
+        <a href={`/leads?promo=${p.slug}`} title={p.label} class:list={["chip !text-[10px]", promoActive === p.slug ? "chip-success" : ""]}>
+          {p.slug.length > 22 ? p.slug.slice(0, 22) + "…" : p.slug}
+        </a>
+      ))}
+    </div>
+  )}
+
   <!-- ANTRIAN PRIORITAS (otomatis sort; 1-tap deal opsional) -->
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
-      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Antrian prioritas <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">skor tertinggi dulu · otomatis</span></h2>
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Antrian prioritas <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">skor tertinggi dulu · otomatis{promoActive ? ` · filter: /promo/${promoActive}` : ""}</span></h2>
       <span class="chip text-[10px]">{queue.length} prospek</span>
     </div>
     {queue.length === 0 ? (
