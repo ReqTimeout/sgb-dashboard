@@ -146,10 +146,10 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
   </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Total belanja 30 hari" value={fmtRp(totalSpend)} hint="Meta + Google · 05:30 + 05:35 WIB" />
-    <StatCard label="Prospek dari iklan" value={fmtInt(totalLeads)} hint="Meta CTWA (langsung ke WA, lewat website) · bukan /leads" ok={totalLeads > 0} />
-    <StatCard label="Kunjungan organik" value={fmtInt(orgClicks)} hint={`senilai ${fmtRp(organicValue)} · GSC 05:00`} ok={orgClicks > 0} />
-    <StatCard label="Biaya per prospek" value={totalLeads ? fmtRp(cpa) : "—"} hint="gabungan semua channel · benchmark ≤Rp15rb" warn={cpa > 500000} ok={totalLeads > 0 && cpa <= 15000} />
+    <StatCard label="Total belanja 30 hari" value={fmtRp(totalSpend)} hint="Meta + Google · 05:30 + 05:35 WIB" source={"Σ 30 hari: Meta Graph insights (05:30) + Google Ads API (05:35)"} />
+    <StatCard label="Prospek dari iklan" value={fmtInt(totalLeads)} hint="Meta CTWA (langsung ke WA, lewat website) · bukan /leads" ok={totalLeads > 0} source={"Meta chat_started + Google Ads conversions. Chat dari iklan TIDAK lewat website — masuk langsung ke WA CS."} />
+    <StatCard label="Kunjungan organik" value={fmtInt(orgClicks)} hint={`senilai ${fmtRp(organicValue)} · GSC 05:00`} ok={orgClicks > 0} source={"GSC clicks 30h · estimasi nilai pakai CPC Meta acuan Rp1.500 (pembanding kasar)"} />
+    <StatCard label="Biaya per prospek" value={totalLeads ? fmtRp(cpa) : "—"} hint="gabungan semua channel · benchmark ≤Rp15rb" warn={cpa > 500000} ok={totalLeads > 0 && cpa <= 15000} source={"Total spend ÷ total leads · blended Meta+Google · CTWA Indonesia sehat ≤Rp15rb/chat"} />
   </div>
 
   {revenue > 0 && (

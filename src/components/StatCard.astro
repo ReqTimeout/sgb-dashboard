@@ -1,5 +1,6 @@
 ---
 import Sparkline from "./Sparkline.astro";
+import Icon from "./Icon.astro";
 
 interface Props {
   label: string;
@@ -7,11 +8,12 @@ interface Props {
   delta?: number;
   deltaLabel?: string;
   hint?: string;
+  source?: string;       // S2.5: tooltip "dari mana angka ini" — sumber data + jam cron
   spark?: number[];
   warn?: boolean;
   ok?: boolean;
 }
-const { label, value, delta, deltaLabel, hint, spark, warn, ok } = Astro.props;
+const { label, value, delta, deltaLabel, hint, source, spark, warn, ok } = Astro.props;
 const deltaPos = (delta ?? 0) > 0;
 const deltaNeg = (delta ?? 0) < 0;
 const deltaCls = warn
@@ -36,7 +38,13 @@ const toneDot = warn ? "var(--danger)" : ok ? "var(--success)" : "var(--border-s
   )}
   <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
     {(warn || ok) && <span class="h-1.5 w-1.5 rounded-full" style={`background:${toneDot}`}></span>}
-    {label}
+    <span class="flex-1 truncate">{label}</span>
+    {source && (
+      <span class="group relative inline-flex cursor-help">
+        <Icon name="info" size="xs" class="opacity-60 group-hover:opacity-100" />
+        <span class="pointer-events-none absolute -top-1 right-0 z-10 hidden whitespace-pre rounded-lg bg-[#1C1917] px-2 py-1.5 text-[10px] font-medium leading-snug text-white shadow-lg group-hover:block group-focus-within:block" style="min-width:160px; max-width:240px; line-height:1.35;">{source}</span>
+      </span>
+    )}
   </div>
   <div class="mt-1 flex items-baseline gap-2">
     <span class="font-[family-name:var(--font-display)] text-[28px] font-extrabold leading-none tracking-tight" style={warn ? "color: var(--danger);" : ok ? "color: var(--success);" : ""}>{value}</span>

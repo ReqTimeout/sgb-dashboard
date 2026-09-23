@@ -1,11 +1,13 @@
 ---
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
+import EmptyState from "../components/EmptyState.astro";
+import Icon from "../components/Icon.astro";
 import { getRequestTenant, latestMetric, recentArticles } from "../lib/data";
-import { fmtInt } from "../lib/insights";
+import { fmtInt, etaMonths } from "../lib/insights";
 import { count, eq } from "drizzle-orm";
 import { getDb } from "../lib/db";
-import { keywordInventory } from "../../drizzle/schema";
+import { keywordInventory, articlesView } from "../../drizzle/schema";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -22,6 +24,15 @@ try {
   const r = await getDb().select({ n: count() }).from(keywordInventory).where(eq(keywordInventory.tenantId, tenant.id));
   antreCount = Number(r[0]?.n ?? 0);
 } catch { /* DB belum migrasi → tampilkan — */ }
+
+// S2.6: Kecepatan = published 30 hari terakhir, fallback ke metric pub24 × 30.
+let ratePer30d = 0;
+try {
+  const r = await getDb().select({ n: count() }).from(articlesView).where(eq(articlesView.tenantId, tenant.id));
+  ratePer30d = Number(r[0]?.n ?? 0);
+} catch { /* ignore */ }
+
+const etaText = etaMonths(antreCount, Math.max(ratePer30d, Number(pub24?.value ?? 0) * 30, 1));
 
 const stages = [
   { label: "Antre", value: antreCount, note: "keyword menunggu draft", tint: "var(--text-faint)" },
@@ -59,6 +70,21 @@ const maxV = Math.max(...stages.map((s) => Number(s.value ?? 0)), 1);
     </div>
   </div>
 
+  <!-- S2.6: ETA Mesin Konten -->
+  <div class="card mt-4 flex items-start gap-3 p-4">
+    <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--brand-soft)] text-[color:var(--brand)]">
+      <Icon name="clock" size="md" strokeWidth={1.75} />
+    </span>
+    <div class="flex-1">
+      <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Estimasi antrean</div>
+      <p class="mt-1 text-sm leading-relaxed text-[color:var(--text-secondary)]">{etaText}</p>
+      <p class="mt-1 text-xs text-[color:var(--text-muted)]">
+        Kecepatan saat ini dihitung dari artikel yang terbit 30 hari terakhir.
+        Bisa dipercepat dengan batch generate — minta agent via command <code class="rounded bg-[color:var(--bg-surface-2)] px-1 font-mono text-[11px]">gen batch</code>.
+      </p>
+    </div>
+  </div>
+
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
       <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Artikel terbaru <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">snapshot push harian</span></h2>
@@ -72,8 +98,19 @@ const maxV = Math.max(...stages.map((s) => Number(s.value ?? 0)), 1);
         </tr>
       </thead>
       <tbody>
-        {list.length === 0 && <tr><td colspan="2" class="px-4 py-10 text-center text-[color:var(--text-faint)]">Belum ada snapshot — push pertama 05:00 WIB.</td></tr>}
-        {list.map((a) => (
+        {list.length === 0 ? (
+          <tr>
+            <td colspan="2" class="px-4 py-8">
+              <EmptyState
+                title="Belum ada snapshot"
+                message="Push pertama biasanya besok pagi setelah cron daily-report berjalan."
+                mascot="peek"
+                when="Snapshot diperbarui tiap pagi 05:00 WIB dari database artikel."
+                action="Tidak perlu apa-apa — besok pagi artikel live di Google akan muncul di sini."
+              />
+            </td>
+          </tr>
+        ) : list.map((a) => (
           <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
             <td class="px-5 py-2.5">{a.title}</td>
             <td class="px-5 py-2.5 text-right">

@@ -27,16 +27,22 @@
     loading = false;
   });
 
-  const severityIcon: Record<string, string> = {
-    warn: "⚠️",
-    info: "💡",
-    good: "✅",
+  const severityColor: Record<string, string> = {
+    warn: "var(--c-bad)",
+    info: "var(--c-info)",
+    good: "var(--c-good)",
   };
   const severityBorder: Record<string, string> = {
     warn: "border-[color:var(--danger)]/30 bg-[color:var(--danger-soft)]",
     info: "border-[color:var(--info)]/30 bg-[color:var(--info-soft)]",
     good: "border-[color:var(--success)]/30 bg-[color:var(--success-soft)]",
   };
+  // Inline SVG monoline — DNA Seni Patah-hati agen (tanpa emoji).
+  function severityIconPath(sev: string): string {
+    if (sev === "warn") return "M12 3 2 21h20zM12 10v5M12 18h.01"; // triangle warning
+    if (sev === "good") return "M5 12l5 5L20 7"; // checkmark
+    return "M12 8v4M12 16h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"; // circle info
+  }
   const categoryLabel: Record<string, string> = {
     seo: "SEO",
     ads: "Iklan",
@@ -70,7 +76,9 @@
     {#each actions as a (a.id)}
       <li class="rounded-lg border p-3 {severityBorder[a.severity] ?? ''}">
         <div class="flex items-start gap-3">
-          <span class="text-base leading-none">{severityIcon[a.severity] ?? "•"}</span>
+          <span class="grid h-5 w-5 shrink-0 place-items-center rounded-full" style={`color:${severityColor[a.severity] ?? 'var(--text-muted)'}`}>
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d={severityIconPath(a.severity)} /></svg>
+          </span>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
               <span class="chip text-[10px]">{categoryLabel[a.category] ?? a.category}</span>
@@ -78,7 +86,7 @@
             </div>
             <p class="mt-1 text-xs leading-relaxed text-[color:var(--text-secondary)]">{a.detail}</p>
             <div class="mt-1.5 flex items-center gap-2">
-              <span class="text-[10px] font-semibold" style={`color:${a.severity === "good" ? "var(--c-good)" : a.severity === "warn" ? "var(--c-bad)" : "var(--c-info)"}`}>Dampak: {a.impact}</span>
+              <span class="text-[10px] font-semibold" style={`color:${severityColor[a.severity] ?? 'var(--text-muted)'}`}>Dampak: {a.impact}</span>
               {#if a.cta}
                 <a href={a.cta.href} class="btn btn-ghost !py-0.5 !px-2 text-[11px] font-semibold">{a.cta.label} →</a>
               {/if}

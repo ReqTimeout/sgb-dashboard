@@ -3,6 +3,9 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import BarChartLC from "../components/BarChartLC.svelte";
 import LineChartLC from "../components/LineChartLC.svelte";
+import EmptyState from "../components/EmptyState.astro";
+import Icon from "../components/Icon.astro";
+import InfoHint from "../components/InfoHint.astro";
 import { getRequestTenant, series, sumRange } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
@@ -150,16 +153,23 @@ try {
   </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Spend 30 hari (AKTIF)" value={fmtRp(mSpend)} hint="campaign berjalan saja" spark={spend.slice(-14).map((p) => p.value)} />
-    <StatCard label="Chat WA masuk" value={fmtInt(mChats)} hint="mulai percakapan" spark={chatStarted.slice(-14).map((p) => p.value)} ok={mChats > 0} />
-    <StatCard label="Chat dibalas" value={fmtInt(mReplied)} hint="customer benar-benar bales" ok={mReplied > 0} />
-    <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"}`} warn={mChats > 0 && cpaChat > 15000} ok={mChats > 0 && cpaChat <= 15000} />
+    <StatCard label="Spend 30 hari (AKTIF)" value={fmtRp(mSpend)} hint="campaign berjalan saja · GSC 05:30" spark={spend.slice(-14).map((p) => p.value)} source={"Meta Graph API insights · campaign status ACTIVE · push 05:30 WIB"} />
+    <StatCard label="Chat WA masuk" value={fmtInt(mChats)} hint="mulai percakapan · Meta Insight CTWA" spark={chatStarted.slice(-14).map((p) => p.value)} ok={mChats > 0} source={"chat_started Meta CTWA — lead yang klik tombol WA dari iklan (langsung ke WA, tidak lewat situs)"} />
+    <StatCard label="Chat dibalas" value={fmtInt(mReplied)} hint="customer benar-benar bales · Meta Insight" ok={mReplied > 0} source={"chat_replied Meta — dari semua chat yang masuk, berapa yang customer bales balik (CS side, dashboard meta)"} />
+    <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"} · benchmark CTWA ≤ Rp15rb`} warn={mChats > 0 && cpaChat > 15000} ok={mChats > 0 && cpaChat <= 15000} source={"Spend ÷ chat · CPA per bales = spend ÷ reply (jarang < Rp100rb) · benchmark CTWA Indonesia Rp2-15rb/chat"} />
   </div>
 
   {promosActive.length > 0 && (
     <div class="card mt-4 overflow-hidden">
       <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
-        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🏷️ Promo aktif <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">landing siap diiklankan</span></h2>
+        <div>
+          <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
+            <Icon name="tag" size="sm" strokeWidth={1.75} />
+            Landing siap diiklankan
+            <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">tujuan iklan · tinggal dipasang di Meta/Google</span>
+          </h2>
+          <p class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">Halaman promo dari toko publik. Dashboard ini tidak punya landing sendiri — landing ada di sariglassbangunan.com.</p>
+        </div>
         <span class="chip chip-success text-[10px]">{promosActive.length} live</span>
       </div>
       <ul class="divide-y divide-[color:var(--border-subtle)]">
@@ -170,7 +180,9 @@ try {
               <div class="truncate font-semibold">{p.label}</div>
               <div class="text-[11px] text-[color:var(--text-muted)]">{fmtRp(p.originalPrice)} → <strong class="text-[color:var(--danger)]">{fmtRp(p.priceMin)}</strong> (−{p.pct}%) · s/d {p.endsAt.slice(0, 10)}</div>
             </div>
-            <a href={`https://sariglassbangunan.com/promo/${p.slug}/`} target="_blank" rel="noopener" class="btn shrink-0 !py-1 text-xs">Landing ↗</a>
+            <div class="flex shrink-0 flex-col items-end gap-1">
+              <a href={`https://sariglassbangunan.com/promo/${p.slug}/`} target="_blank" rel="noopener" class="btn !py-1 text-xs">Landing <Icon name="external-link" size="xs" class="ml-1" /></a>
+            </div>
           </li>
         ))}
       </ul>
@@ -223,7 +235,11 @@ try {
 
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
-      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🛰️ Status Tracking <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">CAPI · GTM · dedupe — dicek live tiap buka halaman</span></h2>
+      <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
+        <Icon name="shield" size="sm" strokeWidth={1.75} />
+        Status Tracking
+        <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">CAPI · GTM · dedupe — dicek live tiap buka halaman</span>
+      </h2>
       <span class:list={["chip text-[10px]", trackOkCount === trackRows.length ? "chip-success" : trackOkCount >= 2 ? "chip-warning" : "chip-danger"]}>{trackOkCount}/{trackRows.length} sehat</span>
     </div>
     <ul class="divide-y divide-[color:var(--border-subtle)]">
@@ -245,7 +261,11 @@ try {
     <div class="card mt-4 overflow-hidden">
       <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
         <div>
-          <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">⚙️ Rekomendasi kreatif <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">read-only · disetujui manual di UI Meta</span></h2>
+          <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
+            <Icon name="settings" size="sm" strokeWidth={1.75} />
+            Rekomendasi kreatif
+            <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">read-only · disetujui manual di UI Meta</span>
+          </h2>
           <p class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">Dari cron creative-fatigue · {creativeTired.length} adset butuh perhatian</p>
         </div>
         <span class="chip chip-warning text-[10px]">TIDAK otomatis</span>
@@ -265,30 +285,42 @@ try {
     </div>
   )}
 
+  <!-- S2.6: Konteks chat-bales — jelaskan kenapa angka chat dibalas rendah, link ke /leads -->
+  {mChats > 0 && mReplied > 0 && mChats / mReplied > 5 && (
+    <div class="card mt-4 flex items-start gap-3 p-4" style="background: linear-gradient(135deg, rgb(245 158 11 / 0.10), transparent);">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--warning-soft)] text-[color:var(--warning)]">
+        <Icon name="clock" size="sm" strokeWidth={1.75} />
+      </span>
+      <div class="flex-1">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--warning)]">Balas chat lebih cepat bisa naikkan konversi</div>
+        <p class="mt-1 text-sm text-[color:var(--text-secondary)]">
+          Hanya {fmtInt(mReplied)} dari {fmtInt(mChats)} chat WA ({Math.round(mReplied / mChats * 100)}%) yang dibalas CS. Benchmark Meta CTWA: balas &lt; 5 menit = konversi naik 2-3&times;.
+        </p>
+      </div>
+      <a href="/leads" class="btn shrink-0 !py-1 text-xs">Lihat chat belum dibalas →</a>
+    </div>
+  )}
+
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
       <div>
-        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🔍 Audit Meta Ads <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">read-only · snapshot cron 05:30 WIB</span></h2>
+        <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
+          <Icon name="search" size="sm" strokeWidth={1.75} />
+          Audit Meta Ads
+          <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">read-only · snapshot cron 05:30 WIB</span>
+        </h2>
         <p class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">Hanya campaign <strong class="text-[color:var(--success)]">AKTIF</strong>. {summary.active != null && `${summary.active} AKTIF, ${summary.paused ?? 0} PAUSED disembunyikan.`}{summary.active == null && "Menunggu cron berikutnya."}</p>
       </div>
       <span class="chip chip-warning text-[10px]">Tidak ada perubahan dilakukan</span>
     </div>
     {campaigns.length === 0 ? (
-      <div class="px-5 py-10 text-center">
-        <div class="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-[color:var(--warning-soft)] text-[color:var(--warning)]">
-          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        </div>
-        <h3 class="font-[family-name:var(--font-heading)] text-sm font-bold">Audit panel belum terisi</h3>
-        <p class="mt-1 text-xs text-[color:var(--text-muted)]">
-          {auditError
-            ? `Audit endpoint belum hidup di admin. Setelah admin redeploy (biasanya 5-10 menit setelah push), panel ini otomatis terisi breakdown per campaign AKTIF.`
-            : `Belum ada audit terbaru. Cron meta-insights akan jalan lagi 05:30 WIB — panel ini terisi otomatis setiap hari dengan CPA per chat, CPC, dan chat dibalas.`}
-        </p>
-        <div class="mt-3 inline-flex items-center gap-2 rounded-lg bg-[color:var(--bg-surface-2)] px-3 py-1.5 text-[11px] text-[color:var(--text-faint)]">
-          <span class="pulse-dot"></span>
-          Pending: cron meta-insights berikutnya di 05:30 WIB
-        </div>
-      </div>
+      <EmptyState
+        title="Audit panel belum terisi"
+        message={auditError ? "Audit endpoint belum hidup di admin. Setelah admin redeploy (biasanya 5-10 menit setelah push), panel ini otomatis terisi breakdown per campaign AKTIF." : "Belum ada audit terbaru. Cron meta-insights akan jalan lagi 05:30 WIB — panel ini terisi otomatis setiap hari dengan CPA per chat, CPC, dan chat dibalas."}
+        mascot="clock"
+        when="Cron meta-insights berikutnya: 05:30 WIB (tiap hari)."
+        action="Tidak perlu apa-apa — data masuk otomatis."
+      />
     ) : (
       <div class="overflow-x-auto">
         <table class="w-full min-w-[720px] text-sm">
@@ -322,14 +354,29 @@ try {
       </div>
     )}
     <div class="border-t border-[color:var(--border-subtle)] px-5 py-3 text-[11px] text-[color:var(--text-faint)]">
-      💡 <strong class="text-[color:var(--text-secondary)]">Benchmark CTWA Indonesia:</strong> CPA per chat Rp2-15rb (sehat), Rp15-30rb (pantau), {">"}Rp30rb (mahal). Lihat IMPROVEMENT.md §D2 untuk konteks.
+      <span class="inline-flex items-center gap-1 font-semibold text-[color:var(--text-secondary)]">
+        <Icon name="info" size="xs" />
+        Benchmark CTWA Indonesia
+      </span>: CPA per chat Rp2-15rb (sehat), Rp15-30rb (pantau), {">"}Rp30rb (mahal). Benchmark berlaku untuk toko ritel bahan bangunan lokal.
     </div>
   </div>
 
-  {gSpend > 0 && (
+  {gSpend > 0 ? (
     <div class="card mt-4 p-5">
       <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Google Ads <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">{fmtRp(gSpend)} spend 30h</span></h2>
       <p class="mt-2 text-sm text-[color:var(--text-muted)]">Aktif sejak P9 dijalankan. Konversi via GA4 import sudah live.</p>
+    </div>
+  ) : (
+    <div class="card mt-4 flex items-start gap-3 p-4" style="background: linear-gradient(135deg, rgb(245 158 11 / 0.06), transparent);">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--warning-soft)] text-[color:var(--warning)]">
+        <Icon name="rocket" size="sm" strokeWidth={1.75} />
+      </span>
+      <div class="flex-1">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--warning)]">Google Ads siap aktif</div>
+        <p class="mt-1 text-sm text-[color:var(--text-secondary)]">
+          Tracker GA4 sudah terpasang — data {fmtRp(gSpend)} spend akan masuk otomatis begitu campaign pertama jalan. ⛔ Tidak ada campaign yang dibuat otomatis; menunggu perintah Bos untuk aktivasi (P9).
+        </p>
+      </div>
     </div>
   )}
 </Base>

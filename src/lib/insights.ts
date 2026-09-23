@@ -10,9 +10,23 @@ export function fmtInt(n: number | null | undefined): string {
   return new Intl.NumberFormat("id-ID").format(Math.round(n));
 }
 
-export function fmtRp(n: number | null | undefined): string {
-  if (n == null || Number.isNaN(n) || n === 0) return "Rp0";
-  return "Rp" + new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+/**
+ * Format rupiah konsisten:
+ * - null/NaN/0 → "Rp0" atau "—" sesuai konteks
+ * - < Rp100rb → tampil penuh "Rp65.000"
+ * - ≥ Rp100rb tapi < Rp1jt → ringkas "Rp100rb" / "Rp245rb"
+ * - ≥ Rp1jt → "Rp1,2jt" / "Rp2jt" (1 desimal maksimal)
+ * - ≥ Rp1M → "Rp1jt" tanpa desimal
+ */
+export function fmtRp(n: number | null | undefined, opts: { dashOnZero?: boolean } = {}): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  if (n === 0) return opts.dashOnZero ? "—" : "Rp0";
+  if (n < 100_000) return "Rp" + new Intl.NumberFormat("id-ID").format(Math.round(n));
+  if (n < 1_000_000) return "Rp" + Math.round(n / 1_000) + "rb";
+  // jt: 1 desimal Maksimal, no trailing zero
+  const jt = n / 1_000_000;
+  const trimmed = jt % 1 === 0 ? jt.toFixed(0) : (Math.round(jt * 10) / 10).toString();
+  return "Rp" + trimmed.replace(".", ",") + "jt";
 }
 
 export function fmtPct(x: number | null | undefined): string {
@@ -64,4 +78,42 @@ export function greet(): string {
   if (h < 15) return "Selamat siang";
   if (h < 19) return "Selamat sore";
   return "Selamat malam";
+}
+
+/**
+ * ETA: hitung estimasi bulan habis dari antrean + kecepatan.
+ * - queueSize: jumlah item di antrean
+ * - ratePer30d: jumlah item yang sudah diproses 30 hari terakhir
+ * Return: kalimat manusia Indonesia dengan rencana jelas.
+ */
+export function etaMonths(queueSize: number, ratePer30d: number): string {
+  if (queueSize <= 0) return "Antrean kosong — semua sudah diproses.";
+  if (ratePer30d <= 0) return `Antrean ${fmtInt(queueSize)} — kecepatan belum terukur. Minta agent percepat via command "generate batch".`;
+  const bulan = queueSize / ratePer30d;
+  if (bulan <= 1) return `Antrean ${fmtInt(queueSize)} — habis dalam ${fmtInt(Math.ceil(bulan * 30))} hari pada kecepatan ${fmtInt(ratePer30d)} artikel/bulan.`;
+  if (bulan <= 3) return `Antrean ${fmtInt(queueSize)} — habis dalam ±${bulan.toFixed(1)} bulan pada kecepatan saat ini (${fmtInt(ratePer30d)}/bulan). Bisa dipercepat — minta agent generate batch.`;
+  return `Antrean ${fmtInt(queueSize)} — butuh ±${Math.ceil(bulan)} bulan pada kecepatan saat ini (${fmtInt(ratePer30d)}/bulan). Pertimbangkan percepat dengan batch atau tambah paralel writer.`;
+}
+
+/**
+ * formatTanggal: tanggal ISO → "23 Sep 2026" atau "Senin, 23 Sep 2026".
+ */
+export function formatTanggal(iso: string | Date, withDay = false): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (isNaN(d.getTime())) return "—";
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
+  const base = new Intl.DateTimeFormat("id-ID", opts).format(d);
+  if (!withDay) return base;
+  return new Intl.DateTimeFormat("id-ID", { weekday: "long", ...opts }).format(d);
+}
+
+/**
+ * formatWaktu: "HH:MM WIB"
+ */
+export function formatWaktu(iso?: string | Date | null): string {
+  const d = iso ? (typeof iso === "string" ? new Date(iso) : iso) : new Date();
+  if (isNaN(d.getTime())) return "—";
+  const h = String(d.getUTCHours() + 7).padStart(2, "0");
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${h}:${m} WIB`;
 }

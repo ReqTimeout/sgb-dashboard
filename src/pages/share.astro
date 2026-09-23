@@ -76,10 +76,10 @@ const newToken = Astro.url.searchParams.get("token");
     <div class="card p-5 lg:col-span-2">
       <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Preview publik <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">ringkasan otomatis</span></h2>
       <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Klik Google" value={fmtInt(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0))} />
-        <StatCard label="Belanja iklan" value={fmtRp(mSpend + gSpend)} />
-        <StatCard label="Lead / konversi" value={fmtInt(mChats + gConv)} ok={mChats + gConv > 0} />
-        <StatCard label="Nilai SEO" value={fmtRp(orgClicks * 1500)} hint="estimasi" ok={orgClicks > 0} />
+        <StatCard label="Klik Google" value={fmtInt(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0))} source={"Snapshot dari dashboard utama · klik ke halaman asli via token • diperbarui tiap halaman dashboard dibuka"} />
+        <StatCard label="Belanja iklan" value={fmtRp(mSpend + gSpend)} source={"Meta + Google spend 30 hari · ACTIVE campaign only"} />
+        <StatCard label="Lead / konversi" value={fmtInt(mChats + gConv)} ok={mChats + gConv > 0} source={"chat_started Meta + Google Ads conversions 30 hari"} />
+        <StatCard label="Nilai SEO" value={fmtRp(orgClicks * 1500)} hint="estimasi" ok={orgClicks > 0} source={"Estimasi kasar: klik organik × Rp1.500 (setara CPC Meta minimum)"} />
       </div>
       <div class="mt-3">
         <BarChartLC data={spendDaily.slice(-14).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={160} barClass="fill-[#0081fb]" client:visible />

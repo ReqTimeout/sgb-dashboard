@@ -3,6 +3,9 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import LineChartLC from "../components/LineChartLC.svelte";
 import BarChartLC from "../components/BarChartLC.svelte";
+import Icon from "../components/Icon.astro";
+import InfoHint from "../components/InfoHint.astro";
+import EmptyState from "../components/EmptyState.astro";
 import { getRequestTenant, latestRanks, series, sumRange } from "../lib/data";
 import { fmtInt, fmtNum, fmtPct, fmtRp } from "../lib/insights";
 
@@ -82,10 +85,10 @@ const heroNarative = totClicks > 0
   </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Klik 90 hari" value={fmtInt(totClicks)} delta={trendClicks} spark={clicks.slice(-14).map((p) => p.value)} />
-    <StatCard label="Tayang 90 hari" value={fmtNum(totImpr)} delta={trendImpr} hint="kali tampil di pencarian" spark={impr.slice(-14).map((p) => p.value)} />
-    <StatCard label="CTR rata-rata" value={fmtPct(avgCtr)} hint="benchmark Indonesia e-commerce 2-4%" ok={(avgCtr ?? 0) >= 0.02} warn={(avgCtr ?? 1) < 0.01} />
-    <StatCard label="Posisi rata-rata" value={avgPos ? avgPos.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" ok={avgPos != null && avgPos <= 10} warn={avgPos != null && avgPos > 20} />
+    <StatCard label="Klik 90 hari" value={fmtInt(totClicks)} delta={trendClicks} spark={clicks.slice(-14).map((p) => p.value)} source={"GSC searchAnalytics · push 05:00 WIB · update tiap hari dari Google Search Console"} />
+    <StatCard label="Tayang 90 hari" value={fmtNum(totImpr)} delta={trendImpr} hint="kali tampil di pencarian" spark={impr.slice(-14).map((p) => p.value)} source={"GSC searchAnalytics · 05:00 WIB · impressions = berapa kali muncul di hasil Google"} />
+    <StatCard label="CTR rata-rata" value={fmtPct(avgCtr)} hint="benchmark Indonesia e-commerce 2-4%" ok={(avgCtr ?? 0) >= 0.02} warn={(avgCtr ?? 1) < 0.01} source={"Klik ÷ Tayang. Naik = judul/meta lebih menarik di mata user. Indonesia ritel 2-4% dianggap sehat."} />
+    <StatCard label="Posisi rata-rata" value={avgPos ? avgPos.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" ok={avgPos != null && avgPos <= 10} warn={avgPos != null && avgPos > 20} source={"Rata-rata posisi semua keyword yang dapat klik. ≤10 berarti sudah di halaman 1."} />
   </div>
 
   <div class="card mt-4 p-5">
@@ -149,13 +152,21 @@ const heroNarative = totClicks > 0
   <!-- OPPORTUNITY: posisi 4-10 + impressions tinggi -->
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
-      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">🎯 Peluang cepat <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">keyword halaman 2-3 yang banyak dicari</span></h2>
+      <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
+        <Icon name="target" size="sm" strokeWidth={1.75} />
+        Peluang cepat
+        <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">keyword halaman 2-3 yang banyak dicari</span>
+      </h2>
       <span class="chip text-[10px]">{opportunities.length} kandidat</span>
     </div>
     {opportunities.length === 0 ? (
-      <div class="px-5 py-8 text-center text-sm text-[color:var(--text-faint)]">
-        Belum ada keyword di posisi 4-10. Biasanya muncul setelah artikel di-halaman 1 mulai stabil (~2-3 bulan setelah push).
-      </div>
+      <EmptyState
+        title="Belum ada peluang"
+        message="Keyword posisi 4-10 dengan tayang tinggi belum terdeteksi."
+        mascot="search"
+        when="Biasanya muncul 2-3 bulan setelah artikel halaman-1 mulai stabil."
+        action="Biarin mesin jalan — keyword yang ada sedang naik perlahan."
+      />
     ) : (
       <table class="w-full text-sm">
         <thead class="bg-[color:var(--bg-surface-2)]/60 text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">

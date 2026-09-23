@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import EmptyState from "../components/EmptyState.astro";
+import Icon from "../components/Icon.astro";
 import { getRequestTenant } from "../lib/data";
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../lib/db";
@@ -28,13 +29,15 @@ const libUrl = (q: string) => `https://www.facebook.com/ads/library/?active_stat
           <li class="flex items-center justify-between gap-2 rounded-lg bg-[color:var(--bg-surface-2)] px-2.5 py-1.5">
             <span class="min-w-0">
               <span class="block truncate font-semibold">{w.pageName}</span>
-              <a class="text-[11px] text-[color:var(--info)] hover:underline" href={libUrl(w.pageName)} target="_blank" rel="noopener">Lihat iklan di Ad Library ↗</a>
+              <a class="text-[11px] text-[color:var(--info)] hover:underline" href={libUrl(w.pageName)} target="_blank" rel="noopener">Lihat iklan di Ad Library <Icon name="external-link" size="xs" class="inline" /></a>
             </span>
             {user.role === "superadmin" && (
               <form method="post" action="/api/radar/watch">
                 <input type="hidden" name="action" value="del" />
                 <input type="hidden" name="id" value={w.id} />
-                <button class="rounded px-1.5 py-0.5 text-[11px] text-[color:var(--text-faint)] hover:text-[color:var(--danger)]" title="Hapus">✕</button>
+                <button class="grid h-6 w-6 place-items-center rounded text-[color:var(--text-faint)] hover:bg-[color:var(--danger-soft)] hover:text-[color:var(--danger)]" title="Hapus" aria-label="Hapus">
+                  <Icon name="x" size="xs" />
+                </button>
               </form>
             )}
           </li>
@@ -56,9 +59,14 @@ const libUrl = (q: string) => `https://www.facebook.com/ads/library/?active_stat
       {ads.length === 0 ? (
         <div class="mt-3">
           <EmptyState
-            title="Belum ada data iklan kompetitor"
-            message="Klik link Ad Library di samping untuk cek manual hari ini, atau aktifkan API otomatis (panduan di bawah) agar halaman ini terisi sendiri tiap minggu."
+            title="Belum ada iklan terdeteksi"
+            message="Aktifkan API Meta Ad Library atau tambah manual dari link Ad Library di samping untuk mulai."
             mascot="search"
+            when="API otomatis terjadwal setelah pengajuan akses Meta disetujui (bisa 1-2 minggu).Sementara itu, link ke Ad Library bisa dicek manual kapan saja."
+            action="Buka salah satu link kompetitor di samping untuk lihat iklan mereka yang aktif — copy & CTA bisa langsung jadi referensi."
+            ctaLabel="Buka Meta Ad Library"
+            ctaHref="https://www.facebook.com/ads/library/"
+            ctaExternal
           />
         </div>
       ) : (

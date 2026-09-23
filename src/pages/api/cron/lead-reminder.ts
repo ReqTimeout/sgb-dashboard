@@ -57,7 +57,7 @@ export const GET: APIRoute = async ({ url }) => {
     await transporter.sendMail({
       from: process.env.REPORT_FROM ?? process.env.SMTP_USER,
       to,
-      subject: `⏰ ${stale.length} lead belum dibalas >24 jam — Beriklan Pipeline`,
+      subject: `${stale.length} lead belum dibalas >24 jam — Beriklan Pipeline`,
       html: `<div style="font-family:Arial,sans-serif;max-width:560px"><h2 style="color:#DC2626">⏰ Lead perlu follow-up</h2><p>${stale.length} lead masih berstatus BARU lebih dari 24 jam. Segera balas via WhatsApp — lead dingin = uang hilang.</p>${blocks}<p><a href="https://sgb.beriklan.co.id/leads" style="display:inline-block;background:#FACC15;color:#1C1917;font-weight:bold;padding:10px 20px;border-radius:8px;text-decoration:none">Buka Pipeline →</a></p><p style="color:#888;font-size:12px">Otomatis 07:00 WIB · Beriklan Agency</p></div>`,
     });
     return Response.json({ ok: true, stale: stale.length, sent: true });

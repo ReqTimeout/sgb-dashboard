@@ -29,7 +29,7 @@ const up7 = movers.filter((m) => (m.move ?? 0) > 0).length;
 
 function badge(pos: number | null): string {
   if (pos == null) return `<span class="chip">—</span>`;
-  if (pos <= 3) return `<span class="chip chip-warning">🎯 TOP ${pos}</span>`;
+  if (pos <= 3) return `<span class="chip chip-warning">TOP ${pos}</span>`;
   if (pos <= 10) return `<span class="chip chip-success">Hal. 1 · ${pos}</span>`;
   return `<span class="chip">Hal. 2+ · ${pos}</span>`;
 }
@@ -50,10 +50,10 @@ function badge(pos: number | null): string {
   </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Rata-rata posisi" value={avg ? avg.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" />
-    <StatCard label="TOP 3" value={fmtInt(top3)} hint="gold tier" />
-    <StatCard label="TOP 10" value={fmtInt(top10)} hint="page 1" />
-    <StatCard label="Naik 7 hari" value={fmtInt(up7)} delta={up7 - movers.filter((m) => (m.move ?? 0) < 0).length} hint={up7 > movers.filter((m) => (m.move ?? 0) < 0).length ? "netral ke atas" : "netral ke bawah"} />
+    <StatCard label="Rata-rata posisi" value={avg ? avg.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" source={"Rata-rata rank_snapshots.keyword agregat. Push tiap pagi 05:10 WIB."} />
+    <StatCard label="TOP 3" value={fmtInt(top3)} hint="gold tier" source={"Keyword dengan posisi ≤3 di Google. Driver utama klik organik."} />
+    <StatCard label="TOP 10" value={fmtInt(top10)} hint="page 1" source={"Keyword di posisi 4-10 (= halaman 1 Google). Sweet spot untuk didorong naik ke TOP 3."} />
+    <StatCard label="Naik 7 hari" value={fmtInt(up7)} delta={up7 - movers.filter((m) => (m.move ?? 0) < 0).length} hint={up7 > movers.filter((m) => (m.move ?? 0) < 0).length ? "netral ke atas" : "netral ke bawah"} source={"Δ posisi ranking vs 7 hari lalu. Naik = makin page-one; turun = turun halaman."} />
   </div>
 
   <div class="mt-4 overflow-x-auto rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--bg-surface)]">

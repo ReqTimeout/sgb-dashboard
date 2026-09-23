@@ -4,6 +4,7 @@ import StatCard from "../components/StatCard.astro";
 import AreaChartLC from "../components/AreaChartLC.svelte";
 import CopilotWidget from "../components/CopilotWidget.svelte";
 import InfoHint from "../components/InfoHint.astro";
+import Icon from "../components/Icon.astro";
 import { getRequestTenant, latestMetric, series, sumRange } from "../lib/data";
 import { delta, fmtInt, fmtNum, fmtRp, greet } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
@@ -129,10 +130,10 @@ const headline = hasData
 
   <!-- WOW 4 KARTU -->
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Klik Google /7 hari" value={fmtInt(sum7)} delta={d.pct ?? undefined} spark={sparkClicks} hint={`GSC · 05:00 WIB · ${hasData ? "live" : "menunggu push pertama"}`} />
-    <StatCard label="Tayang /7 hari" value={fmtNum(imp7)} hint="kali muncul di hasil pencarian · GSC" spark={sparkImpr} />
-    <StatCard label="Artikel terbit" value={pub ? fmtInt(pub.value) : "—"} hint={`live di Google · dari admin cron · ${fmtInt(pub?.value ?? 0)} total`} />
-    <StatCard label="Lead WA /14 hari" value={leads ? fmtInt(leads.value) : "—"} hint={leads ? "beacon situs · real-time" : "klik WhatsApp dari web · nantikan"} spark={sparkLeads} />
+    <StatCard label="Klik Google /7 hari" value={fmtInt(sum7)} delta={d.pct ?? undefined} spark={sparkClicks} hint={`GSC · 05:00 WIB · ${hasData ? "live" : "menunggu push pertama"}`} source={"GSC searchAnalytics · push tiap pagi 05:00 WIB · SUM(sehari) × 7 hari"} />
+    <StatCard label="Tayang /7 hari" value={fmtNum(imp7)} hint="kali muncul di hasil pencarian · GSC" spark={sparkImpr} source={"GSC impressions · jumlah munculnya situs di hasil pencarian (walaupun tidak diklik)"} />
+    <StatCard label="Artikel terbit" value={pub ? fmtInt(pub.value) : "—"} hint={`live di Google · dari admin cron · ${fmtInt(pub?.value ?? 0)} total`} source={"Artikel total yang sudah ter-publish dan ter-index Google. Ditambahkan dari admin pipeline."} />
+    <StatCard label="Lead WA /14 hari" value={leads ? fmtInt(leads.value) : "—"} hint={leads ? "beacon situs · real-time" : "klik WhatsApp dari web · nantikan"} spark={sparkLeads} source={"Klik Order WA di website · beacon → capi.beriklan.co.id → /api/ingest/events"} />
   </div>
 
   <!-- AI COPILOT WIDGET (live data → 3 aksi spesifik) -->
@@ -200,8 +201,32 @@ const headline = hasData
 
   <!-- DEEP LINK NAVIGATION -->
   <div class="mt-4 grid gap-3 sm:grid-cols-3">
-    <a href="/seo" class="card p-4"><span class="text-lg">📈</span> <strong class="font-[family-name:var(--font-heading)] text-sm">Performa SEO</strong><br /><span class="text-xs text-[color:var(--text-muted)]">Grafik 90 hari + query & halaman top</span></a>
-    <a href="/ranking" class="card p-4"><span class="text-lg">🎯</span> <strong class="font-[family-name:var(--font-heading)] text-sm">Ranking Tracker</strong><br /><span class="text-xs text-[color:var(--text-muted)]">Posisi keyword hari ini + movers</span></a>
-    <a href="/konten" class="card p-4"><span class="text-lg">📝</span> <strong class="font-[family-name:var(--font-heading)] text-sm">Content Pipeline</strong><br /><span class="text-xs text-[color:var(--text-muted)]">Draft → terbit → terindex</span></a>
+    <a href="/seo" class="card flex items-start gap-3 p-4">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--brand-soft)] text-[color:var(--brand)]">
+        <Icon name="trend-up" size="sm" strokeWidth={1.75} />
+      </span>
+      <span>
+        <strong class="font-[family-name:var(--font-heading)] text-sm">Performa SEO</strong><br />
+        <span class="text-xs text-[color:var(--text-muted)]">Grafik 90 hari + query & halaman top</span>
+      </span>
+    </a>
+    <a href="/ranking" class="card flex items-start gap-3 p-4">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--brand-soft)] text-[color:var(--brand)]">
+        <Icon name="target" size="sm" strokeWidth={1.75} />
+      </span>
+      <span>
+        <strong class="font-[family-name:var(--font-heading)] text-sm">Ranking Tracker</strong><br />
+        <span class="text-xs text-[color:var(--text-muted)]">Posisi keyword hari ini + movers</span>
+      </span>
+    </a>
+    <a href="/konten" class="card flex items-start gap-3 p-4">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--brand-soft)] text-[color:var(--brand)]">
+        <Icon name="doc" size="sm" strokeWidth={1.75} />
+      </span>
+      <span>
+        <strong class="font-[family-name:var(--font-heading)] text-sm">Content Pipeline</strong><br />
+        <span class="text-xs text-[color:var(--text-muted)]">Draft → terbit → terindex</span>
+      </span>
+    </a>
   </div>
 </Base>

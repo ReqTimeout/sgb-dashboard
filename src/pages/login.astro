@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
 const next = Astro.url.searchParams.get("next") ?? "/";
 const err = Astro.url.searchParams.get("err");
 ---
@@ -42,7 +43,7 @@ const err = Astro.url.searchParams.get("err");
           <span class="grid h-9 w-9 place-items-center rounded-lg bg-[color:var(--brand)] font-[family-name:var(--font-display)] text-base font-extrabold text-white">B</span>
           <span class="font-[family-name:var(--font-heading)] text-[15px] font-extrabold tracking-tight">Beriklan <span class="font-semibold text-[color:var(--text-faint)]">Dashboard</span></span>
         </div>
-        <h2 class="mt-4 font-[family-name:var(--font-heading)] text-xl font-extrabold tracking-tight">Selamat datang kembali 👋</h2>
+        <h2 class="mt-4 flex items-center gap-2 font-[family-name:var(--font-heading)] text-xl font-extrabold tracking-tight">Selamat datang kembali <Icon name="wave" size="sm" class="ml-0.5 text-[color:var(--brand)]" strokeWidth={1.75} /></h2>
         <p class="mt-1 text-sm text-[color:var(--text-muted)]">Masuk untuk lihat laporan pagimu.</p>
         {err && <p class="mt-4 rounded-lg bg-[color:var(--danger-soft)] px-3 py-2 text-sm font-medium text-[color:var(--danger)]">Email atau password salah.</p>}
         <form method="post" action="/api/auth/login" class="mt-5 space-y-3.5">
