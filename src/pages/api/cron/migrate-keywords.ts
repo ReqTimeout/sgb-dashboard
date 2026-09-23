@@ -49,18 +49,21 @@ export const GET: APIRoute = async ({ url }) => {
       schemaLog.push(await ensureAdd("position_latest", "`position_latest` int NULL"));
       schemaLog.push(await ensureAdd("opportunity_updated_at", "`opportunity_updated_at` datetime NULL"));
 
-      // Tambah unique index pada normalized_keyword (jika belum). Idempotent: cek INFORMATION_SCHEMA dulu.
-      const [idxRows] = await conn.execute(
-        `SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'keyword_inventory' AND INDEX_NAME = 'uq_normalized'`,
-      );
-      const idxN = Number((idxRows as { n: number }[])[0]?.n ?? 0);
-      if (idxN === 0) {
-        // Sementara JANGAN buat UNIQUE dulu — jika ada duplikat setelah normalisasi akan gagal.
-        // Kita gunakan INDEX biasa (non-unique) — dedupe dilakukan di langkah backfill di bawah.
-        await conn.execute("CREATE INDEX `idx_normalized` ON `keyword_inventory` (`tenant_id`, `normalized_keyword`)");
-        schemaLog.push("ADD INDEX idx_normalized (non-unique)");
-      } else {
-        schemaLog.push("skip idx_normalized");
+      // Tambah index pada (tenant, normalized). Idempotent: cek INFORMATION_SCHEMA.STATISTICS dulu.
+      // Pakai NON-UNIQUE — jika ada duplikat setelah normalisasi akan gagal, hentikan pipeline.
+      try {
+        const [idxRows] = await conn.execute(
+          `SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'keyword_inventory' AND INDEX_NAME = 'idx_normalized'`,
+        );
+        const idxN = Number((idxRows as { n: number }[])[0]?.n ?? 0);
+        if (idxN === 0) {
+          await conn.execute("CREATE INDEX `idx_normalized` ON `keyword_inventory` (`tenant_id`, `normalized_keyword`)");
+          schemaLog.push("ADD INDEX idx_normalized");
+        } else {
+          schemaLog.push("skip idx_normalized");
+        }
+      } catch (idxErr) {
+        schemaLog.push(`idx err: ${idxErr instanceof Error ? idxErr.message.slice(0, 80) : String(idxErr)}`);
       }
 
       // 2) Backfill intelijen via enrich library (normalize + cluster + opportunity).
