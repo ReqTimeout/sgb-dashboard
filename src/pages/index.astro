@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import AreaChartLC from "../components/AreaChartLC.svelte";
 import CopilotWidget from "../components/CopilotWidget.svelte";
+import InfoHint from "../components/InfoHint.astro";
 import { getRequestTenant, latestMetric, series, sumRange } from "../lib/data";
 import { delta, fmtInt, fmtNum, fmtRp, greet } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
@@ -86,18 +87,24 @@ const headline = hasData
         <div class="mt-2 text-display text-3xl sm:text-5xl">{tenant.name}</div>
         <p class="mt-3 max-w-xl text-base text-white/85">{headline}</p>
       </div>
-      <div class="grid gap-2 sm:gap-3">
-        <div class="rounded-xl border border-white/15 px-4 py-3">
-          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Hemat dari organik 7 hari</div>
-          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold text-[#34d399]">{fmtRp(organicClickValue)}</div>
-          <div class="text-[10px] text-white/55">≈ setara biaya Meta untuk klik yg sama</div>
+<div class="grid gap-2 sm:gap-3">
+          <div class="rounded-xl border border-white/15 px-4 py-3">
+            <div class="flex items-center gap-1.5 text-[10px] text-white/55 uppercase tracking-[0.12em]">
+              <span>Hemat dari organik 7 hari</span>
+              <InfoHint source="SEO · GSC 05:00" fresh="7 hari · realtime-ish" tooltip="Klik organik × Rp1.000 (estimasi CPC Meta termurah). Angka kasar pembanding, bukan penghemalian nyata." variant="info" />
+            </div>
+            <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold text-[#34d399]">{fmtRp(organicClickValue)}</div>
+            <div class="text-[10px] text-white/55">≈ setara biaya Meta untuk klik yg sama</div>
+          </div>
+          <div class="rounded-xl border border-white/15 px-4 py-3">
+            <div class="flex items-center gap-1.5 text-[10px] text-white/55 uppercase tracking-[0.12em]">
+              <span>Tayang 7 hari</span>
+              <InfoHint source="SEO · GSC 05:00 WIB" variant="info" />
+            </div>
+            <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtNum(imp7)}</div>
+            <div class="text-[10px] text-white/55">kali muncul di Google</div>
+          </div>
         </div>
-        <div class="rounded-xl border border-white/15 px-4 py-3">
-          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Tayang 7 hari</div>
-          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtNum(imp7)}</div>
-          <div class="text-[10px] text-white/55">kali muncul di Google</div>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -122,10 +129,10 @@ const headline = hasData
 
   <!-- WOW 4 KARTU -->
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Klik Google /7 hari" value={fmtInt(sum7)} delta={d.pct ?? undefined} spark={sparkClicks} />
-    <StatCard label="Tayang /7 hari" value={fmtNum(imp7)} hint="kali muncul di hasil pencarian" spark={sparkImpr} />
-    <StatCard label="Artikel terbit" value={pub ? fmtInt(pub.value) : "—"} hint={`${fmtInt(pub?.value ?? 0)} artikel live di Google`} />
-    <StatCard label="Lead WA /14 hari" value={leads ? fmtInt(leads.value) : "—"} hint="klik WhatsApp dari web" spark={sparkLeads} />
+    <StatCard label="Klik Google /7 hari" value={fmtInt(sum7)} delta={d.pct ?? undefined} spark={sparkClicks} hint={`GSC · 05:00 WIB · ${hasData ? "live" : "menunggu push pertama"}`} />
+    <StatCard label="Tayang /7 hari" value={fmtNum(imp7)} hint="kali muncul di hasil pencarian · GSC" spark={sparkImpr} />
+    <StatCard label="Artikel terbit" value={pub ? fmtInt(pub.value) : "—"} hint={`live di Google · dari admin cron · ${fmtInt(pub?.value ?? 0)} total`} />
+    <StatCard label="Lead WA /14 hari" value={leads ? fmtInt(leads.value) : "—"} hint={leads ? "beacon situs · real-time" : "klik WhatsApp dari web · nantikan"} spark={sparkLeads} />
   </div>
 
   <!-- AI COPILOT WIDGET (live data → 3 aksi spesifik) -->
@@ -154,11 +161,11 @@ const headline = hasData
         </span>
       </p>
       <p class="rounded-lg bg-[color:var(--bg-surface-2)]/60 p-3">
-        <strong class="text-[color:var(--text-primary)]">Lead WA jalan terus.</strong>{" "}
+        <strong class="text-[color:var(--text-primary)]">{leads?.value ? "Lead WA jalan terus." : "Lead WA siap dicatat."}</strong>{" "}
         <span class="text-[color:var(--text-secondary)]">
           {leads?.value
             ? `${fmtInt(leads.value)} klik WA masuk 14 hari terakhir. Tertinggi biasanya Senin-Sabtu malam.`
-            : "Belum ada lead WA — halaman ini terisi otomatis dari klik tombol WhatsApp di situs."}
+            : "Mesin tracking siap — beacon aktif, CAPI gateway sehat. Setiap klik Order WA di situs otomatis tercatat di sini dalam beberapa detik."}
         </span>
       </p>
     </div>

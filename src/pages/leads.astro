@@ -1,15 +1,20 @@
 ---
 import Base from "../layouts/Base.astro";
-import StatCard from "../components/StatCard.astro";
 import BarChartLC from "../components/BarChartLC.svelte";
 import LineChartLC from "../components/LineChartLC.svelte";
 import EmptyState from "../components/EmptyState.astro";
+import InfoHint from "../components/InfoHint.astro";
 import { getRequestTenant, series, sumRange } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { scoreLead, fmtRpShort } from "../lib/ai/lead-score";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import { leadEvents } from "../../drizzle/schema";
+
+// helpers — konsisten antar hero / channel / antrean. Pakai || bukan ??
+// supaya dealValue=0 (legacy/null) tetap dihitung dari estimasi, tidak hilang.
+const realized = (r: { status: string | null; dealValue: number | null; sc: { estValue: number } }) =>
+  r.status === "deal" ? r.dealValue || r.sc.estValue : r.sc.estValue;
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -49,7 +54,6 @@ const queue = [...scored]
 // Sisi iklan (otomatis dari producer)
 const mSpend = sumRange(await series(tenant.id, "meta_ads", "spend", 30), 30, 0);
 const mChats = Math.round(sumRange(await series(tenant.id, "meta_ads", "leads", 30), 30, 0));
-const mReplied = Math.round(sumRange(await series(tenant.id, "meta_ads", "chat_replied", 30), 30, 0));
 const gSpend = sumRange(await series(tenant.id, "google_ads", "spend", 30), 30, 0);
 const gConv = Math.round(sumRange(await series(tenant.id, "google_ads", "conversions", 30), 30, 0));
 const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0));
@@ -57,44 +61,51 @@ const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 3
 // Statistik per channel (100% otomatis)
 interface ChStat { name: string; href: string; leads: number; est: number; hot: number; stale: number; extra: string; verdict: string; verdictCls: string; }
 const staleCut = Date.now() - 12 * 3600 * 1000;
-function chStat(name: string, href: string, extra: string, verdict: string, verdictCls: string): ChStat {
+function chStat(name: string, href: string, extra: string): ChStat {
   const list = scored.filter((r) => r.channel === name);
-  return {
-    name, href,
-    leads: list.length,
-    est: list.filter((r) => (r.status ?? "baru") !== "deal").reduce((a, r) => a + r.sc.estValue, 0),
-    hot: list.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length,
-    stale: list.filter((r) => (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < staleCut).length,
-    extra, verdict, verdictCls,
-  };
+  const leads = list.length;
+  // potensi: SUM (dealValue || estValue) untuk semua lead non-batal.
+  // Status "deal" dihitung pakai dealValue riil (jika > 0) — fallback estimasi jika legacy 0.
+  const est = list.filter((r) => (r.status ?? "baru") !== "batal").reduce((a, r) => a + realized(r), 0);
+  const hot = list.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length;
+  const stale = list.filter((r) => (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < staleCut).length;
+  // Verdict: hanya muncul kalau channel punya prospek. Tanpa prospek → netral "Belum ada data".
+  let verdict = "Belum ada data";
+  let verdictCls = "chip";
+  if (leads > 0) {
+    verdict = "Bagus";
+    verdictCls = "chip chip-success";
+  }
+  return { name, href, leads, est, hot, stale, extra, verdict, verdictCls };
 }
 const mCpa = mChats > 0 ? mSpend / mChats : 0;
 const channels: ChStat[] = [
-  chStat("Meta Ads", "/iklan", mSpend > 0 ? `${fmtRp(mCpa)}/chat · ${fmtRp(mSpend)} spend` : "belum ada spend",
-    mChats === 0 ? "Belum jalan" : mCpa <= 15000 ? "Bagus" : mCpa <= 30000 ? "Pantau" : "Mahal",
-    mChats === 0 ? "chip" : mCpa <= 15000 ? "chip chip-success" : mCpa <= 30000 ? "chip chip-warning" : "chip chip-danger"),
-  chStat("Google Ads", "/iklan", gSpend > 0 ? `${fmtRp(gSpend)} spend · ${gConv} konversi` : "belum jalan (P9)",
-    gSpend > 0 ? "Berjalan" : "Siap (impor GA4 aktif)", gSpend > 0 ? "chip chip-success" : "chip"),
-  chStat("Organik", "/seo", `${fmtInt(orgClicks)} klik gratis/30h`,
-    orgClicks > 0 ? "Bagus" : "Menunggu", orgClicks > 0 ? "chip chip-success" : "chip"),
-  chStat("Promo", "/iklan", "halaman /promo/*", "—", "chip"),
-  chStat("Langsung", "/leads", "tanpa perantara", "—", "chip"),
-  chStat("Referral", "/leads", "dari situs lain", "—", "chip"),
+  chStat("Meta Ads", "/iklan",
+    mSpend > 0
+      ? (mChats > 0 ? `${fmtRp(mCpa)}/chat · ${fmtRp(mSpend)} spend` : `Belum ada chat · ${fmtRp(mSpend)} spend`)
+      : "Belum ada belanja iklan"),
+  chStat("Google Ads", "/iklan", gSpend > 0 ? `${fmtRp(gSpend)} spend · ${gConv} konversi` : "Menunggu perintah Bos"),
+  chStat("Organik", "/seo", `${fmtInt(orgClicks)} klik gratis/30h${orgClicks === 0 ? "" : " · dari Google"}`),
+  chStat("Promo", "/iklan", "dari halaman /promo/*"),
+  chStat("Langsung", "/leads", "tanpa perantara"),
+  chStat("Referral", "/leads", "dari situs lain"),
 ].filter((c) => c.leads > 0 || ["Meta Ads", "Google Ads", "Organik"].includes(c.name));
 
-const potTotal = scored.filter((r) => (r.status ?? "baru") !== "deal" && (r.status ?? "baru") !== "batal")
-  .reduce((a, r) => a + r.sc.estValue, 0);
+// Potensi konsisten: SUM dealValue||estValue untuk semua lead non-batal.
+const potTotal = scored.filter((r) => (r.status ?? "baru") !== "batal")
+  .reduce((a, r) => a + realized(r), 0);
 const best = [...channels].filter((c) => c.leads > 0).sort((a, b) => b.est - a.est)[0];
 const hotN = scored.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length;
 
-// Revenue per channel (dari deal)
+// Revenue per channel (dari deal_value riil — kalau 0/null, tampilkan estimasi dengan label jelas)
 const revByCh = new Map<string, number>();
-let revTotal = 0;
-for (const r of rows) {
-  if (r.status === "deal" && r.dealValue) {
+const revEstByCh = new Map<string, number>();
+for (const r of scored) {
+  if (r.status === "deal") {
     const ch = toChannel(r.source, r.pageUrl);
-    revByCh.set(ch, (revByCh.get(ch) ?? 0) + r.dealValue);
-    revTotal += r.dealValue;
+    const real = r.dealValue && r.dealValue > 0 ? r.dealValue : r.sc.estValue;
+    revByCh.set(ch, real);
+    if (!r.dealValue || r.dealValue <= 0) revEstByCh.set(ch, (revEstByCh.get(ch) ?? 0) + 1);
   }
 }
 
@@ -129,14 +140,15 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
         <div class="mt-1 text-display text-2xl sm:text-3xl">
           {total > 0
             ? `${fmtInt(total)} prospek · potensi ${fmtRpShort(potTotal)}`
-            : "Menunggu prospek pertama"}
+            : "Menunggu prospek pertama dari situs"}
         </div>
         <p class="mt-2 text-sm text-white/80">
           {total > 0
             ? best
               ? `Channel terbaik: ${best.name} (${fmtInt(best.leads)} prospek, potensi ${fmtRpShort(best.est)}). Status dihitung otomatis — tanpa isi form.`
               : "Data prospek mulai terbaca."
-            : "Setiap klik WhatsApp di situs otomatis masuk sini lengkap dengan channel asalnya (Meta, Google, organik, promo, langsung)."}
+            : "Setiap klik WhatsApp di situs otomatis masuk sini lengkap dengan channel asalnya."}
+          <span class="ml-1 align-middle text-white/60">[<InfoHint source="Beacon situs" fresh="real-time · capi.beriklan.co.id" tooltip="Chat dari iklan Meta masuk ke WA CS — tidak lewat website, jadi tidak muncul di sini. ROAS / revenue tetap dihitung di halaman /roi." variant="info" />]</span>
         </p>
       </div>
       <div class="grid gap-2">
@@ -169,7 +181,7 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
         <div class="mt-1 flex items-center gap-2 text-[11px] text-[color:var(--text-muted)]">
           <span class="truncate">{c.extra}</span>
           {c.hot > 0 && <span class="chip chip-danger shrink-0 !text-[9px]">{c.hot} HOT</span>}
-          {c.stale > 0 && <span class="shrink-0 text-[color:var(--warning)]">⏰{c.stale}</span>}
+          {c.stale > 0 && <span class="shrink-0 text-[color:var(--warning)]">{c.stale} mnd</span>}
         </div>
       </a>
     ))}
@@ -190,13 +202,19 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
           <span class:list={[tierChip(r.sc.tier), "!text-[9px] shrink-0"]}>{r.sc.tier} {r.sc.score}</span>
           <div class="min-w-0 flex-1">
             <div class="truncate font-medium">{shortPage(r.pageUrl)}</div>
-            <div class="text-[11px] text-[color:var(--text-faint)]">{ago(r.ts)} · {r.channel} · {(r.status ?? "baru") === "deal" ? `deal ${fmtRpShort(r.dealValue ?? 0)}` : r.sc.reasons.slice(0, 2).join(" · ")}</div>
+            <div class="text-[11px] text-[color:var(--text-faint)]">
+              {ago(r.ts)} · {r.channel} · {(r.status ?? "baru") === "deal"
+                ? `deal ${r.dealValue && r.dealValue > 0 ? fmtRpShort(r.dealValue) : `≈${fmtRpShort(r.sc.estValue)} (estimasi)`}`
+                : r.sc.reasons.slice(0, 2).join(" · ")}
+            </div>
           </div>
-          <span class="hidden font-[family-name:var(--font-mono-num)] text-xs font-bold text-[color:var(--success)] sm:inline">≈{fmtRpShort(r.dealValue ?? r.sc.estValue)}</span>
+          <span class="hidden font-[family-name:var(--font-mono-num)] text-xs font-bold text-[color:var(--success)] sm:inline">
+            {(r.status ?? "baru") === "deal" && r.dealValue && r.dealValue > 0 ? fmtRpShort(r.dealValue) : `≈${fmtRpShort(r.sc.estValue)}`}
+          </span>
           {(r.status ?? "baru") !== "deal" && (r.status ?? "baru") !== "batal" && (
             <form method="post" action="/api/pipeline/update">
               <input type="hidden" name="id" value={r.id} />
-              <button name="status" value="deal" type="submit" title="Tandai deal (nilai otomatis)" class="btn shrink-0 !py-1 !text-[11px]">✓ Deal</button>
+              <button name="status" value="deal" type="submit" title="Tandai deal (nilai otomatis dari estimasi)" class="btn shrink-0 !py-1 !text-[11px]">✓ Deal</button>
             </form>
           )}
           {(r.status ?? "baru") === "deal" && <span class="chip chip-success shrink-0 !text-[9px]">DEAL</span>}
@@ -208,15 +226,18 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
 
   {revByCh.size > 0 && (
     <div class="card mt-4 p-4">
-      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Pendapatan per channel <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">dari deal</span></h2>
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Pendapatan per channel <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">dari deal · {revEstByCh.size > 0 ? "≈ termasuk estimasi" : "nilai riil"}</span></h2>
       <div class="mt-2 grid gap-2 sm:grid-cols-3">
         {[...revByCh.entries()].map(([s, v]) => (
           <div class="rounded-lg bg-[color:var(--bg-surface-2)] px-3 py-2">
             <div class="text-[11px] text-[color:var(--text-muted)]">{s}</div>
-            <div class="font-[family-name:var(--font-mono-num)] text-lg font-bold text-[color:var(--success)]">{fmtRp(v)}</div>
+            <div class="font-[family-name:var(--font-mono-num)] text-lg font-bold text-[color:var(--success)]">{fmtRp(v)}{revEstByCh.has(s) ? "*" : ""}</div>
           </div>
         ))}
       </div>
+      {revEstByCh.size > 0 && (
+        <p class="mt-2 text-[10px] text-[color:var(--text-faint)]">* Nilai dari deal yang belum diinput manual — dihitung dari estimasi kategori produk. <a href="/roi" class="text-[color:var(--info)] hover:underline">Pelajari di /roi →</a></p>
+      )}
     </div>
   )}
 

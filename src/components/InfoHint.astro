@@ -1,0 +1,62 @@
+---
+// Chip sumber data kecil dengan tooltip "dari mana angka ini".
+// Tampil di bawah angka besar. Style: monoline monokrom, tidak mencuri fokus.
+interface Props {
+  source?: string;       // "Meta Ads · 05:30 WIB"
+  fresh?: string;        // "diperbarui 4 menit lalu"
+  tooltip?: string;      // penjelasan tambahan opsional
+  variant?: "muted" | "info";
+}
+const { source, fresh, tooltip, variant = "muted" } = Astro.props;
+const full = [source, fresh, tooltip].filter(Boolean).join(" \u00b7 ");
+---
+{!(source || fresh || tooltip) ? null : (
+  <span
+    class={`info-hint inline-flex items-center gap-1 rounded-full border px-2 py-px text-[10px] font-medium leading-tight ${variant === "info" ? "border-[color:var(--info)] bg-[color:var(--info-soft)] text-[color:var(--info)]" : "border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)] text-[color:var(--text-muted)]"}`}
+    data-tip={full}
+    tabindex="0"
+    aria-label={`Sumber data: ${full}`}
+  >
+    <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+    <span>{source ?? fresh ?? tooltip}</span>
+  </span>
+)}
+
+<style>
+  .info-hint { position: relative; cursor: help; outline: none; }
+  .info-hint[data-tip]:hover::after,
+  .info-hint[data-tip]:focus::after,
+  .info-hint[data-tip]:focus-visible::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1C1917;
+    color: #fff;
+    padding: 0.4rem 0.65rem;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: pre-line;
+    max-width: 240px;
+    width: max-content;
+    text-align: center;
+    z-index: 50;
+    box-shadow: 0 6px 18px rgba(0,0,0,.18);
+    pointer-events: none;
+  }
+  .info-hint[data-tip]:hover::before,
+  .info-hint[data-tip]:focus::before,
+  .info-hint[data-tip]:focus-visible::before {
+    content: "";
+    position: absolute;
+    bottom: calc(100% + 1px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #1C1917;
+    z-index: 50;
+    pointer-events: none;
+  }
+</style>

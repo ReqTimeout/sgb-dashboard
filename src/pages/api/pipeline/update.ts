@@ -45,10 +45,12 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
   if (!me) return new Response("Unauthorized", { status: 401 });
 
   const form = await request.formData().catch(() => null);
+  const rawDV = form?.get("deal_value");
   const parsed = Body.safeParse({
     id: form?.get("id"),
     status: form?.get("status"),
-    deal_value: form?.get("deal_value") ? form.get("deal_value") : null,
+    // null = "tidak ada input", biarkan auto-fill jalan. Angka >= 1 = dipakai apa adanya. 0 juga dianggap kosong.
+    deal_value: rawDV == null || rawDV === "" || rawDV === "0" ? null : rawDV,
     note: form?.get("note") ? String(form.get("note")) : null,
   });
   if (!parsed.success) return new Response("Input tidak valid", { status: 400 });
@@ -64,11 +66,19 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
     if (!rows[0]) return new Response("Lead tidak ditemukan", { status: 404 });
     const was = rows[0];
     const newStatus = parsed.data.status;
-    // OTOMATIS: deal tanpa nilai → isi estimasi dari skor halaman (tanpa input manual)
-    let dealValue = parsed.data.deal_value ?? (newStatus === "deal" ? was.dealValue : null);
-    if (newStatus === "deal" && !dealValue) {
-      const { scoreLead } = await import("../../../lib/ai/lead-score");
-      dealValue = scoreLead({ pageUrl: was.pageUrl, source: was.source, ts: was.ts, status: was.status }).estValue;
+    // OTOMATIS: deal tanpa nilai eksplisit → isi estimasi dari skor halaman (fallback ke nilai sebelumnya > 0).
+    // "0" dan null keduanya berarti "klik tombol Deal cepat", bukan "transaksi nol rupiah".
+    let dealValue: number | null = null;
+    if (newStatus === "deal") {
+      const provided = parsed.data.deal_value;
+      if (provided && provided > 0) {
+        dealValue = provided;
+      } else if (was.dealValue && was.dealValue > 0) {
+        dealValue = was.dealValue;
+      } else {
+        const { scoreLead } = await import("../../../lib/ai/lead-score");
+        dealValue = scoreLead({ pageUrl: was.pageUrl, source: was.source, ts: was.ts, status: was.status }).estValue;
+      }
     }
     await db
       .update(leadEvents)

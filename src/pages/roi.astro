@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import BarChartLC from "../components/BarChartLC.svelte";
+import InfoHint from "../components/InfoHint.astro";
 import { getRequestTenant, series, sumRange } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
@@ -40,6 +41,15 @@ const dealRows = await db
   .where(and(eq(leadEvents.tenantId, tenant.id), eq(leadEvents.status, "deal"), gte(leadEvents.ts, since)))
   .groupBy(leadEvents.source);
 
+// S1: hitung deal_value nyata vs estimasi (untuk bintang penanda transparansi).
+// Ambil list deal dengan dealValue riil > 0 (estimator tidak dipakai)
+const dealReal = await db
+  .select({ v: leadEvents.dealValue })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), eq(leadEvents.status, "deal"), gte(leadEvents.ts, since)));
+const dealsWithValue = dealReal.filter((r) => r.v != null && r.v > 0).length;
+const hasEstimate = dealCount - dealsWithValue;
+
 const totalSpend = mSpend + gSpend;
 const totalLeads = mChats + gConv;
 const cpa = totalLeads ? Math.round(totalSpend / totalLeads) : 0;
@@ -49,22 +59,26 @@ const organicValue = orgClicks * 1500;
 const pct = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(a / b < 0.1 ? 1 : 0)}%` : "—");
 
 // Funnel Meta: belanja → klik → chat → dibalas → deal → revenue
-const funnel = [
-  { label: "Belanja iklan", value: fmtRp(mSpend), sub: "30 hari", conv: null as string | null },
-  { label: "Klik iklan", value: fmtInt(mClicks), sub: `CPC ${mClicks ? fmtRp(Math.round(mSpend / mClicks)) : "—"}`, conv: null },
-  { label: "Chat WhatsApp", value: fmtInt(mChats), sub: `CPA ${mChats ? fmtRp(Math.round(mSpend / mChats)) : "—"}`, conv: pct(mChats, mClicks) },
-  { label: "Dibalas", value: fmtInt(mReplied), sub: "pelanggan merespons", conv: pct(mReplied, mChats) },
-  { label: "Deal", value: fmtInt(dealCount), sub: "tercatat di pipeline", conv: pct(dealCount, mReplied) },
-  { label: "Revenue", value: fmtRp(revenue), sub: roas > 0 ? `ROAS ${roas.toFixed(1)}×` : "nilai deal", conv: null },
+// Tiap stage punya `source` ringkas untuk chip InfoHint.
+const funnel: { label: string; value: string; sub: string; conv: string | null; source: string }[] = [
+  { label: "Belanja iklan", value: fmtRp(mSpend), sub: "30 hari · ACTIVE", conv: null, source: "Meta Insights · 05:30 WIB" },
+  { label: "Klik iklan", value: fmtInt(mClicks), sub: `CPC ${mClicks ? fmtRp(Math.round(mSpend / mClicks)) : "—"}`, conv: pct(mClicks, 0), source: "Meta Insights · 05:30 WIB" },
+  { label: "Chat WhatsApp", value: fmtInt(mChats), sub: `CPA ${mChats ? fmtRp(Math.round(mSpend / mChats)) : "—"} · chat dari iklan (CTWA, langsung ke WA CS, tidak lewat website)`, conv: pct(mChats, mClicks), source: "Meta Insights · 05:30 WIB" },
+  { label: "Dibalas", value: fmtInt(mReplied), sub: "CS merespons chat WA", conv: pct(mReplied, mChats), source: "Meta Insights · 05:30 WIB" },
+  { label: "Deal", value: fmtInt(dealCount), sub: "tercatat di pipeline", conv: pct(dealCount, mReplied), source: "Pipeline /leads · manual" },
+  { label: "Revenue", value: fmtRp(revenue), sub: roas > 0 ? `ROAS ${roas.toFixed(1)}×` : "nilai deal", conv: null, source: `Pipeline ${dealsWithValue}/${dealCount} nilai riil · ${hasEstimate > 0 ? `lainnya ≈ estimasi` : "semua riil"}` },
 ];
 
 let headline = "";
 if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
   headline = "Belum ada data. Sistem pengumpul sudah berjalan dan angka akan terisi otomatis.";
 } else if (roas > 0) {
-  headline = `Setiap Rp1 belanja iklan menghasilkan Rp${roas.toFixed(1)} pendapatan tercatat. ${fmtInt(dealCount)} transaksi dari ${fmtInt(mChats)} percakapan WhatsApp.`;
+  headline = `Setiap Rp1 belanja iklan menghasilkan Rp${roas.toFixed(1)} pendapatan tercatat. ${fmtInt(dealCount)} transaksi dari ${fmtInt(mChats)} percakapan WhatsApp (chat dari iklan Meta — klik langsung ke WA CS, tidak lewat website).`;
 } else if (totalSpend === 0) {
   headline = `Tanpa belanja iklan, ${fmtInt(orgClicks)} kunjungan organik senilai ${fmtRp(organicValue)} datang gratis dari Google.`;
+} else if (dealCount > 0 && revenue === 0) {
+  // S1: deal tercatat tapi revenue Rp0 → kemungkinan nilai belum diinput / auto-estimasi kosong.
+  headline = `${fmtRp(totalSpend)} belanja iklan menghasilkan ${fmtInt(totalLeads)} prospek. ${fmtInt(dealCount)} transaksi tercatat, ${dealsWithValue} di antaranya sudah punya nilai riil. ${hasEstimate > 0 ? `Sisanya (${fmtInt(hasEstimate)} deal) diestimasi otomatis — tim bisa update manual di /leads.` : "Tandai nilai deal di pipeline agar ROAS tampil."}`;
 } else {
   headline = `${fmtRp(totalSpend)} belanja iklan menghasilkan ${fmtInt(totalLeads)} prospek. ${fmtInt(mReplied)} di antaranya merespons — catat nilai transaksinya di pipeline agar ROAS tampil di sini.`;
 }
@@ -82,12 +96,24 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
       </div>
       <div class="grid gap-2 sm:gap-3">
         <div class="rounded-xl border border-white/15 px-4 py-3">
-          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">ROAS</div>
+          <div class="flex items-center gap-1.5 text-[10px] text-white/55 uppercase tracking-[0.12em]">
+            <span>ROAS</span>
+            <InfoHint source={roas > 0 ? "Pendapatan ÷ belanja" : "Menunggu deal"} fresh={roas > 0 ? "5 menit lalu · realtime" : "auto-update tiap dealsync"} tooltip="ROAS baru tampil setelah ada deal dengan nilai transaksi riil. Estimasi tidak dihitung agar ROAS tidak menyesatkan." variant="info" />
+          </div>
           <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold" style="color:#34d399">{roas > 0 ? `${roas.toFixed(1)}×` : "—"}</div>
-          <div class="text-[10px] text-white/55">{roas > 0 ? "pendapatan ÷ belanja iklan" : "terisi setelah ada deal bernilai"}</div>
+          <div class="text-[10px] text-white/55">
+            {roas > 0
+              ? "pendapatan ÷ belanja iklan"
+              : hasEstimate > 0
+                ? `${hasEstimate} deal masih estimasi — buka /leads untuk isi nilai riil`
+                : "terisi setelah ada deal bernilai"}
+          </div>
         </div>
         <div class="rounded-xl border border-white/15 px-4 py-3">
-          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Biaya per prospek</div>
+          <div class="flex items-center gap-1.5 text-[10px] text-white/55 uppercase tracking-[0.12em]">
+            <span>Biaya per prospek</span>
+            <InfoHint source="Meta + Google" fresh="05:30 · 05:35 WIB" tooltip={`Total spend 30h ÷ total leads (Meta ${fmtInt(mChats)} + Google ${fmtInt(gConv)} chat/konversi).`} variant="info" />
+          </div>
           <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold">{totalLeads ? fmtRp(cpa) : "—"}</div>
           <div class="text-[10px] text-white/55">gabungan Meta + Google</div>
         </div>
@@ -107,9 +133,12 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
           {f.conv && (
             <span class="absolute -top-2 left-3 rounded-full bg-[color:var(--success)] px-1.5 py-px text-[9px] font-bold text-white">{f.conv}</span>
           )}
-          <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--text-faint)]">{String(i + 1).padStart(2, "0")} · {f.label}</div>
+          <div class="flex items-center justify-between gap-1">
+            <span class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--text-faint)]">{String(i + 1).padStart(2, "0")} · {f.label}</span>
+            <InfoHint source={f.source} variant="info" />
+          </div>
           <div class="mt-1 font-[family-name:var(--font-display)] text-xl font-extrabold tracking-tight">{f.value}</div>
-          <div class="mt-0.5 text-[10px] text-[color:var(--text-muted)]">{f.sub}</div>
+          <div class="mt-0.5 text-[10px] leading-snug text-[color:var(--text-muted)]">{f.sub}</div>
         </div>
       ))}
     </div>
@@ -117,10 +146,10 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
   </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Total belanja 30 hari" value={fmtRp(totalSpend)} hint="Meta + Google" />
-    <StatCard label="Prospek dari iklan" value={fmtInt(totalLeads)} hint="chat + konversi" ok={totalLeads > 0} />
-    <StatCard label="Kunjungan organik" value={fmtInt(orgClicks)} hint={`senilai ${fmtRp(organicValue)}`} ok={orgClicks > 0} />
-    <StatCard label="Biaya per prospek" value={totalLeads ? fmtRp(cpa) : "—"} hint="gabungan semua channel" warn={cpa > 500000} ok={totalLeads > 0 && cpa <= 15000} />
+    <StatCard label="Total belanja 30 hari" value={fmtRp(totalSpend)} hint="Meta + Google · 05:30 + 05:35 WIB" />
+    <StatCard label="Prospek dari iklan" value={fmtInt(totalLeads)} hint="Meta CTWA (langsung ke WA, lewat website) · bukan /leads" ok={totalLeads > 0} />
+    <StatCard label="Kunjungan organik" value={fmtInt(orgClicks)} hint={`senilai ${fmtRp(organicValue)} · GSC 05:00`} ok={orgClicks > 0} />
+    <StatCard label="Biaya per prospek" value={totalLeads ? fmtRp(cpa) : "—"} hint="gabungan semua channel · benchmark ≤Rp15rb" warn={cpa > 500000} ok={totalLeads > 0 && cpa <= 15000} />
   </div>
 
   {revenue > 0 && (
@@ -187,7 +216,7 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
         </div>
       ) : (
         <div class="mt-3 rounded-lg bg-[color:var(--bg-surface-2)]/60 p-4 text-sm text-[color:var(--text-muted)]">
-          Belum ada belanja. Kampanye Google Ads disiapkan pada fase P9 — konversi otomatis tercatat melalui impor GA4 yang sudah aktif.
+          Siap aktif — campaign pertama menunggu perintah Bos. Tracker GA4 sudah online, data akan muncul otomatis begitu campaign pertama jalan.
         </div>
       )}
     </div>
