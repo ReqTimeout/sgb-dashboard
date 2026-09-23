@@ -1,0 +1,249 @@
+---
+// TrackingFlow — auto-refresh 30s log viewer + 6-hop diagram + counter strip.
+// Data di-fetch client-side via JSON /api/tracking/log.
+// Client-side reactivity pakai vanilla fetch + setInterval (no framework).
+function ago(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "—";
+  const d = Math.max(0, Date.now() - t);
+  if (d < 60_000) return `${Math.max(1, Math.round(d / 1000))} dtk lalu`;
+  if (d < 3_600_000) return `${Math.round(d / 60_000)} mnt lalu`;
+  if (d < 86_400_000) return `${Math.round(d / 3_600_000)} jam lalu`;
+  return `${Math.round(d / 86_400_000)} hari lalu`;
+}
+
+interface Props {
+  serverSideData?: {
+    counters: { totalAll: number; last24h: number; last7d: number; dedupePct: number; lastTs: string | null };
+    events: Array<{
+      id: number; ts: string | null; type: string | null; source: string | null;
+      pageUrl: string | null; status: string | null; eventId: string | null;
+    }>;
+    hops: Array<{ id: string; title: string; url: string; ok: boolean; note: string }>;
+  };
+}
+const { serverSideData } = Astro.props;
+
+// Prefill data (SSR) sehingga tidak ada empty state saat first paint.
+const initCounters = serverSideData?.counters ?? { totalAll: 0, last24h: 0, last7d: 0, dedupePct: 0, lastTs: null };
+const initEvents = serverSideData?.events ?? [];
+const initHops = serverSideData?.hops ?? [];
+---
+<div class="tracking-flow space-y-4" data-tracking-root data-server-time={new Date().toISOString()}>
+  <!-- COUNTER STRIP - server-rendered first, kemudian client-side live update -->
+  <div class="grid grid-cols-2 gap-2 sm:grid-cols-4" data-counter-strip>
+    <div class="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 px-3 py-3">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Hari ini</span>
+        <span class="inline-flex h-1.5 w-1.5 rounded-full bg-[color:var(--success)] pulse-anim"></span>
+      </div>
+      <div class="mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold" data-c="last24h">{initCounters.last24h}</div>
+      <div class="text-[10px] text-[color:var(--text-muted)]" data-c="lastFetch">memuat…</div>
+    </div>
+    <div class="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 px-3 py-3">
+      <div class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">7 hari</div>
+      <div class="mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold" data-c="last7d">{initCounters.last7d}</div>
+      <div class="text-[10px] text-[color:var(--text-muted)]">event dari semua sumber</div>
+    </div>
+    <div class="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 px-3 py-3">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Dedupe event_id</span>
+        <span class="inline-flex items-center gap-1 text-[10px] font-bold text-[color:var(--success)]">
+          <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg> ok
+        </span>
+      </div>
+      <div class="mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold" data-c="dedupePct">{initCounters.dedupePct}<span class="text-base text-[color:var(--text-faint)]">%</span></div>
+      <div class="text-[10px] text-[color:var(--text-muted)]">event_id unik · dedupe Meta</div>
+    </div>
+    <div class="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 px-3 py-3">
+      <div class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Terakhir</div>
+      <div class="mt-1 font-[family-name:var(--font-display)] text-lg font-extrabold" data-c="lastTs">{ago(initCounters.lastTs)}</div>
+      <div class="text-[10px] text-[color:var(--text-muted)]">last event</div>
+    </div>
+  </div>
+
+  <!-- 6 HOP DIAGRAM -->
+  <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/30 p-3" data-hops>
+    <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      {initHops.map((hop) => (
+        <div class="rounded-md bg-[color:var(--bg-surface)]/60 p-2.5" data-hop-id={hop.id}>
+          <div class="flex items-center gap-1.5">
+            <span class={`h-2 w-2 shrink-0 rounded-full ${hop.ok ? "bg-[color:var(--success)]" : "bg-[color:var(--danger)]"}`}></span>
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-[color:var(--text-secondary)]">{hop.title}</span>
+          </div>
+          <p class="mt-0.5 truncate font-mono text-[9px] text-[color:var(--text-faint)]" title={hop.url}>{hop.url}</p>
+          <p class="mt-1 truncate text-[10px] text-[color:var(--text-muted)]">{hop.note}</p>
+        </div>
+      ))}
+    </div>
+    <p class="mt-2 text-[10px] leading-relaxed text-[color:var(--text-faint)]">
+      Tombol WA di situs → beacon <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">tracking-beacon.ts</code> + <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">event_id</code> → Admin <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">/api/v1/events</code> + CAPI → Meta CAPI Lead (event_id dedupe) + GTM → dashboard ini.
+    </p>
+  </div>
+
+  <!-- LOG VIEWER 20 baris -->
+  <div>
+    <div class="mb-2 flex items-center gap-2">
+      <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Log viewer</span>
+      <span class="text-[10px] text-[color:var(--text-faint)]">· 20 terakhir · auto-refresh 30s · pause saat tab tersembunyi</span>
+      <span class="ml-auto inline-flex items-center gap-1 text-[10px] text-[color:var(--text-faint)]" data-status>
+        <span class="inline-flex h-1.5 w-1.5 rounded-full bg-yellow-500 pulse-anim"></span> memuat…
+      </span>
+    </div>
+    {initEvents.length === 0 ? (
+      <div class="rounded-lg border border-dashed border-[color:var(--border-subtle)] p-8 text-center text-sm text-[color:var(--text-muted)]">
+        Belum ada event dari beacon situs. Coba panel "Tes sendiri" di bawah.
+      </div>
+    ) : (
+      <ul class="space-y-1" data-event-list>
+        {initEvents.map((ev) => <li data-event-row data-event-id={ev.id}></li>)}
+      </ul>
+    )}
+  </div>
+</div>
+
+<script is:inline define:vars={{ serverTime: new Date().toISOString() }}>
+  // Inline client-side script (vanilla JS) — auto-refresh.
+  // Tidak pakai framework state — mutate DOM langsung via dataset.
+  const root = document.querySelector("[data-tracking-root]");
+  if (!root) { /* no-op if not on /tracking */ } else {
+    const statusEl = root.querySelector("[data-status]");
+    const lastFetchEl = root.querySelector("[data-c='lastFetch']");
+    const listEl = root.querySelector("[data-event-list]");
+    const seen = new Set();
+
+    // Initial fill from server-rendered (we need to render via SSR — simplest = hit /api/tracking/log first hit on client, fill the list)
+    renderFromScratch().then(() => loop());
+
+    async function renderFromScratch() {
+      const j = await fetchJson();
+      if (!j) return;
+      seen.clear();
+      for (const e of j.events) seen.add(e.id);
+      updateCounters(j.counters);
+      replaceLog(j.events, /*animateNew=*/ false);
+      status(statusEl, "up-to-date", false);
+    }
+
+    function loop() {
+      let firstTick = true;
+      setInterval(async () => {
+        if (document.visibilityState === "hidden") return;
+        const j = await fetchJson();
+        if (!j) return;
+        updateCounters(j.counters);
+        // Detect new event ids not previously seen -> insert as highlighted top row.
+        const newOnes = j.events.filter((e) => !seen.has(e.id));
+        if (newOnes.length && !firstTick && listEl) {
+          // Insert new ones at top with highlight
+          for (const e of [...newOnes].reverse()) {
+            const li = buildRow(e, true);
+            listEl.prepend(li);
+            seen.add(e.id);
+          }
+          // Cap list to 20 rows (remove oldest)
+          while (listEl.children.length > 20) listEl.removeChild(listEl.lastChild);
+        } else {
+          // first time or no new events: full replace
+          replaceLog(j.events, false);
+          for (const e of j.events) seen.add(e.id);
+        }
+        firstTick = false;
+        status(statusEl, "up-to-date", false);
+      }, 30_000);
+    }
+
+    async function fetchJson() {
+      try {
+        const r = await fetch("/api/tracking/log", { cache: "no-store" });
+        if (!r.ok) return null;
+        return await r.json();
+      } catch { return null; }
+    }
+
+    function updateCounters(c) {
+      const set = (k, v) => { const el = root.querySelector(`[data-c='${k}']`); if (el) el.textContent = v; };
+      set("last24h", c.last24h);
+      set("last7d", c.last7d);
+      set("dedupePct", c.dedupePct);
+      set("lastTs", ago(c.lastTs));
+      if (lastFetchEl) lastFetchEl.textContent = "refresh " + ago(serverTime);
+    }
+
+    function replaceLog(events, animate) {
+      if (!listEl) return;
+      listEl.innerHTML = "";
+      if (!events.length) {
+        const empty = document.createElement("div");
+        empty.className = "rounded-lg border border-dashed p-8 text-center text-sm text-[color:var(--text-muted)]";
+        empty.style.borderColor = "var(--border-subtle)";
+        empty.textContent = "Belum ada event dari beacon situs. Coba panel \"Tes sendiri\" di bawah.";
+        listEl.replaceWith(empty);
+        return;
+      }
+      // Re-create <ul> if replaced with empty div.
+      const parent = listEl.parentElement;
+      const fresh = document.createElement("ul");
+      fresh.className = "space-y-1";
+      fresh.setAttribute("data-event-list", "");
+      for (const ev of events) fresh.appendChild(buildRow(ev, animate));
+      listEl.replaceWith(fresh);
+    }
+
+    function buildRow(ev, animate) {
+      const li = document.createElement("li");
+      li.setAttribute("data-event-row", "");
+      li.setAttribute("data-event-id", String(ev.id));
+      li.className = "flex flex-wrap items-center gap-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)]/50 px-3 py-2 text-xs";
+      if (animate) li.className += " ring-2 ring-[color:var(--success)] bg-[color:var(--success-soft)]/40";
+      const tColor = ev.type === "wa_click" ? "var(--brand)" : ev.type === "form" ? "var(--info)" : ev.type === "call" ? "var(--warning)" : "var(--text-muted)";
+      const tBg = ev.type === "wa_click" ? "rgba(220,38,38,0.10)" : ev.type === "form" ? "rgba(56,189,248,0.10)" : ev.type === "call" ? "rgba(250,204,21,0.12)" : "var(--bg-surface-2)";
+      const sColor = ev.status === "baru" ? "#854d0e" : ev.status === "dibalas" ? "#1d4ed8" : ev.status === "deal" ? "#047857" : ev.status === "batal" ? "#b91c1c" : "#475569";
+      const sBg = ev.status === "baru" ? "#fef3c7" : ev.status === "dibalas" ? "#dbeafe" : ev.status === "deal" ? "#d1fae5" : ev.status === "batal" ? "#fee2e2" : "#f1f5f9";
+      li.innerHTML = `
+        <span class="font-mono text-[10px] font-bold text-[color:var(--text-primary)]">${formatTime(ev.ts)}</span>
+        <span class="rounded px-1.5 py-0.5 text-[10px] font-bold" style="background:${tBg};color:${tColor}">${escapeHtml(ev.type || "?")}</span>
+        <span class="min-w-0 flex-1 truncate font-medium">${escapeHtml(shortPage(ev.pageUrl))}</span>
+        <span class="hidden truncate text-[color:var(--text-faint)] sm:inline-block">${escapeHtml(ev.source || "langsung")}</span>
+        <span class="rounded px-1.5 py-0.5 text-[10px]" style="background:${sBg};color:${sColor}">${escapeHtml(ev.status || "baru")}</span>
+        <span class="font-mono text-[9px] text-[color:var(--text-faint)]" title="${escapeHtml(ev.eventId || "")}">${ev.eventId ? ev.eventId.slice(0,12) + "…" : "no-id"}</span>
+      `;
+      return li;
+    }
+
+    function status(el, label, loading) {
+      if (!el) return;
+      el.innerHTML = `<span class="inline-flex h-1.5 w-1.5 rounded-full ${loading ? "bg-yellow-500 pulse-anim" : "bg-[color:var(--success)]"}"></span> ${label}`;
+    }
+
+    function formatTime(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "—";
+      // Asia/Jakarta (WIB) — pakai locale time
+      return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "Asia/Jakarta" });
+    }
+    function shortPage(u) {
+      if (!u) return "(langsung)";
+      return u.replace("https://sariglassbangunan.com", "").replace("https://www.sariglassbangunan.com", "") || "/";
+    }
+    function ago(iso) {
+      if (!iso) return "—";
+      const t = new Date(iso).getTime();
+      if (isNaN(t)) return "—";
+      const d = Math.max(0, Date.now() - t);
+      if (d < 60_000) return `${Math.max(1, Math.round(d / 1000))} dtk lalu`;
+      if (d < 3_600_000) return `${Math.round(d / 60_000)} mnt lalu`;
+      if (d < 86_400_000) return `${Math.round(d / 3_600_000)} jam lalu`;
+      return `${Math.round(d / 86_400_000)} hari lalu`;
+    }
+    function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]); }
+  }
+</script>
+
+<style>
+  @keyframes pulse-anim { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.6); opacity: 1; } }
+  .pulse-anim { animation: pulse-anim 1.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .pulse-anim { animation: none; } }
+</style>

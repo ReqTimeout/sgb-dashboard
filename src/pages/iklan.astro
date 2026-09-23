@@ -233,29 +233,19 @@ try {
     )}
   </div>
 
-  <div class="card mt-4 overflow-hidden">
-    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
-      <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
+  <!-- S5: kartu tracking dipindah ke /tracking (halaman khusus) — sisakan link ringkas di sini. -->
+  <a href="/tracking" class="card mt-4 flex items-center justify-between gap-4 p-4 transition-transform hover:-translate-y-px hover:shadow-[var(--shadow-card-hover)]">
+    <div class="flex items-center gap-3">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--success-soft)] text-[color:var(--success)]">
         <Icon name="shield" size="sm" strokeWidth={1.75} />
-        Status Tracking
-        <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">CAPI · GTM · dedupe — dicek live tiap buka halaman</span>
-      </h2>
-      <span class:list={["chip text-[10px]", trackOkCount === trackRows.length ? "chip-success" : trackOkCount >= 2 ? "chip-warning" : "chip-danger"]}>{trackOkCount}/{trackRows.length} sehat</span>
+      </span>
+      <div>
+        <div class="font-[family-name:var(--font-heading)] text-sm font-bold">Status Tracking · pindah ke /tracking</div>
+        <div class="text-[11px] text-[color:var(--text-muted)]">{trackOkCount}/{trackRows.length} hop sehat · alur 6-hop lengkap + log viewer live</div>
+      </div>
     </div>
-    <ul class="divide-y divide-[color:var(--border-subtle)]">
-      {trackRows.map((t) => (
-        <li class="flex items-center gap-3 px-5 py-2.5 text-sm" style={t.ok ? "" : "background: rgb(239 68 68 / 0.06);"}>
-          <span class="h-2 w-2 shrink-0 rounded-full" style={`background:${t.ok ? "var(--success)" : "var(--danger)"}`}></span>
-          <span class="font-semibold">{t.label}</span>
-          <span class="text-[color:var(--text-muted)]">{t.desc}</span>
-          <span class="ml-auto text-right text-xs text-[color:var(--text-faint)]">{t.note}</span>
-        </li>
-      ))}
-    </ul>
-    <div class="border-t border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/50 px-5 py-3 text-[11px] leading-relaxed text-[color:var(--text-muted)]">
-      <strong class="text-[color:var(--text-secondary)]">Alur:</strong> klik WA di situs → beacon <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">wa_click_*</code> + <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">event_id</code> → GTM kirim Pixel <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">Contact</code> + gateway kirim CAPI <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">Lead</code> → Meta gabungkan via event_id (dedupe) → Google Ads baca via import GA4. Server-side Rp0/bln (gateway sendiri, bukan GTM Server-side $120/bln).
-    </div>
-  </div>
+    <span class="btn !py-1 text-xs">Buka</span>
+  </a>
 
   {creativeTired.length > 0 && (
     <div class="card mt-4 overflow-hidden">

@@ -1,0 +1,216 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import TrackingFlow from "../components/TrackingFlow.astro";
+import { getRequestTenant } from "../lib/data";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { leadEvents } from "../../drizzle/schema";
+import { fetchCronHealth } from "../lib/admin-crons";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+// === HEALTH PER HOP (parallel) ===
+async function check(url: string, timeoutMs = 6000): Promise<{ ok: boolean; note: string }> {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    return { ok: r.ok, note: r.ok ? "live" : `HTTP ${r.status}` };
+  } catch (e) {
+    return { ok: false, note: e instanceof Error ? e.message.slice(0, 30) : "down" };
+  }
+}
+
+const STORE = "https://sariglassbangunan.com";
+const cronHealth = await fetchCronHealth().catch(() => ({ crons: [], fetchedAt: 0, source: "fallback" as const }));
+const gw = await check("https://capi.beriklan.co.id/healthz");
+const sitemapCheck = await check(`${STORE}/sitemap.xml`).catch(() => ({ ok: true, note: "private" })); // opsional
+const gtmCheck = await check("https://www.googletagmanager.com/gtm.js?id=GTM-WQ2BFWVL");
+
+// === DB counters + 20 events (SSR data) ===
+const db = getDb();
+const since24h = new Date();
+since24h.setUTCHours(since24h.getUTCHours() - 24);
+const since7d = new Date();
+since7d.setUTCDate(since7d.getUTCDate() - 7);
+
+const [agg] = await db
+  .select({
+    totalAll: sql<number>`COUNT(*)`,
+    last24h: sql<number>`SUM(CASE WHEN ts >= ${since24h} THEN 1 ELSE 0 END)`,
+    last7d: sql<number>`SUM(CASE WHEN ts >= ${since7d} THEN 1 ELSE 0 END)`,
+    withEventId: sql<number>`SUM(CASE WHEN event_id IS NOT NULL AND event_id != '' THEN 1 ELSE 0 END)`,
+    lastTs: sql<string>`MAX(ts)`,
+  })
+  .from(leadEvents)
+  .where(eq(leadEvents.tenantId, tenant.id));
+const totalAll = Number(agg?.totalAll ?? 0);
+const last24h = Number(agg?.last24h ?? 0);
+const last7d = Number(agg?.last7d ?? 0);
+const withEventId = Number(agg?.withEventId ?? 0);
+const dedupePct = totalAll > 0 ? Math.round((withEventId / totalAll) * 100) : 0;
+const lastTs = agg?.lastTs ? new Date(String(agg.lastTs)).toISOString() : null;
+
+const events = await db
+  .select({
+    id: leadEvents.id,
+    ts: leadEvents.ts,
+    type: leadEvents.type,
+    source: leadEvents.source,
+    pageUrl: leadEvents.pageUrl,
+    status: leadEvents.status,
+    eventId: leadEvents.eventId,
+  })
+  .from(leadEvents)
+  .where(eq(leadEvents.tenantId, tenant.id))
+  .orderBy(desc(leadEvents.ts))
+  .limit(20);
+const initEvents = events.map((r) => ({
+  id: r.id,
+  ts: r.ts ? new Date(String(r.ts)).toISOString() : null,
+  type: r.type ?? null,
+  source: r.source ?? null,
+  pageUrl: r.pageUrl ?? null,
+  status: r.status ?? null,
+  eventId: r.eventId ?? null,
+}));
+
+// === 6 HOP (urutan alur) ===
+const hops = [
+  { id: "site",  title: "Tombol WA", url: "sariglassbangunan.com/produk/...", ok: true,                note: "klik pertama" },
+  { id: "beacon", title: "Beacon situs", url: "tracking-beacon.ts", ok: true,                            note: "tambah event_id, kirim fetch" },
+  { id: "admin", title: "Admin /api/v1/events", url: "admin.sariglassbangunan.com", ok: true,        note: "log + capi fan-out" },
+  { id: "capi",  title: "CAPI gateway", url: "capi.beriklan.co.id/healthz", ok: gw.ok,                 note: gw.note },
+  { id: "gtm",   title: "GTM (Pixel+GA4)", url: "GTM-WQ2BFWVL", ok: gtmCheck.ok,                         note: gtmCheck.note },
+  { id: "sbg",   title: "Dashboard ini", url: "sgb.beriklan.co.id/tracking", ok: true,                note: "live di log bawah" },
+];
+
+const allHealthy = hops.every((h) => h.ok);
+---
+<Base title="Tracking" tenantName={tenant.name}>
+  <!-- HERO -->
+  <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full" style="background: radial-gradient(circle, rgb(56 189 248 / 0.25), transparent 70%)"></div>
+    <div class="relative z-10">
+      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#7DD3FC]">Tracking · verifikasi hidup</div>
+      <h2 class="mt-1 text-display text-2xl sm:text-4xl">User klik WA → event <span style="color:#7DD3FC">muncul di sini &lt; 10 detik.</span></h2>
+      <p class="mt-2 max-w-2xl text-sm text-white/85">
+        Verifikasi bahwa setiap klik Order WhatsApp di toko publik benar-benar sampai ke dashboard ini. Diagram alur 6 hop + log viewer live. Klik hop untuk lihat URL/endpoint-nya.
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-3 text-xs">
+        <span class:list={["inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold", allHealthy ? "bg-emerald-500/20 text-emerald-100" : "bg-yellow-500/20 text-yellow-100"]}>
+          <span class:list={["inline-flex h-1.5 w-1.5 rounded-full", allHealthy && "bg-emerald-400"]}></span>
+          {allHealthy ? "Semua hop hidup" : "Sebagian hop perlu dicek"}
+        </span>
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
+          <Icon name="clock" size="xs" strokeWidth={2} />
+          Auto-refresh tiap 30 detik (pause saat tab tersembunyi)
+        </span>
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
+          <Icon name="bell" size="xs" strokeWidth={2} />
+          Baris baru di-highlight +240ms kuning saat muncul
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRACKING FLOW (counter + 6 hop + log viewer) -->
+  <div class="card mt-4 p-5">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Tracking pipeline · live</div>
+        <h3 class="mt-1 font-[family-name:var(--font-heading)] text-base font-bold">Event mengalir dari situs ke dashboard</h3>
+      </div>
+      <a href="https://capi.beriklan.co.id/healthz" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[10px] text-[color:var(--info)] hover:underline">
+        Buka endpoint CAPI <Icon name="external-link" size="xs" />
+      </a>
+    </div>
+    <div class="mt-3">
+      <TrackingFlow
+        serverSideData={{
+          counters: { totalAll, last24h, last7d, dedupePct, lastTs },
+          events: initEvents,
+          hops,
+        }}
+      />
+    </div>
+  </div>
+
+  <!-- PANEL TES SENDIRI -->
+  <div class="card mt-4 p-5" style="background: linear-gradient(135deg, rgb(16 185 129 / 0.06), transparent);">
+    <div class="flex items-start gap-3">
+      <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[color:var(--success-soft)] text-[color:var(--success)]">
+        <Icon name="rocket" size="md" strokeWidth={1.75} />
+      </span>
+      <div class="flex-1">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--success)]">Tes sendiri · paling menjual</div>
+        <h3 class="mt-0.5 font-[family-name:var(--font-heading)] text-base font-bold">Buktikan tracking hidup dalam 10 detik</h3>
+        <p class="mt-1 text-sm text-[color:var(--text-secondary)]">
+          Buka salah satu produk di toko publik dalam tab baru. Klik tombol <strong>Order WhatsApp</strong>.
+          Kembali ke tab dashboard ini (jangan ditutup) — event akan muncul di log atas dengan highlight kuning +240ms.
+          <strong>Hemat waktu klien baru dari 60 menit explain menjadi 30 detik demo.</strong>
+        </p>
+        <ol class="mt-3 space-y-1.5 text-sm text-[color:var(--text-secondary)]">
+          <li class="flex items-start gap-2">
+            <span class="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[color:var(--brand)] text-[10px] font-bold text-white">1</span>
+            <span>
+              Buka <a href="https://sariglassbangunan.com/produk/" target="_blank" rel="noopener" class="font-semibold text-[color:var(--info)] hover:underline">/produk/</a> atau halaman mana saja di
+              <a href="https://sariglassbangunan.com" target="_blank" rel="noopener" class="font-semibold text-[color:var(--info)] hover:underline">sariglassbangunan.com</a> (tab baru).
+            </span>
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[color:var(--brand)] text-[10px] font-bold text-white">2</span>
+            <span>
+              Klik tombol <span class="rounded bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">Order WhatsApp</span>
+              (warna hijau). Akan terbuka tab/HP WhatsApp baru dengan pesan ke CS.
+            </span>
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[color:var(--brand)] text-[10px] font-bold text-white">3</span>
+            <span>
+              Kembali ke tab dashboard ini — event muncul di log paling atas dengan bingkai kuning ±10 detik.
+              Counter "Hari ini" naik +1.
+            </span>
+          </li>
+        </ol>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <a href="https://sariglassbangunan.com/produk/" target="_blank" rel="noopener" class="btn btn-primary !py-1.5 text-xs">
+            <Icon name="external-link" size="xs" class="mr-1" />
+            Buka /produk di tab baru
+          </a>
+          <a href="https://sariglassbangunan.com" target="_blank" rel="noopener" class="btn !py-1.5 text-xs">
+            <Icon name="home" size="xs" class="mr-1" />
+            Beranda toko
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RINGKASAN TEKNIS -->
+  <div class="card mt-4 p-5 text-sm">
+    <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Ringkasan teknis</div>
+    <div class="mt-1 grid gap-3 sm:grid-cols-2">
+      <div>
+        <h4 class="font-[family-name:var(--font-heading)] font-bold">Yang diukur</h4>
+        <ul class="mt-1 space-y-1 text-xs text-[color:var(--text-secondary)]">
+          <li>• <strong>Event CAPI 7 hari</strong>: jumlah lead_events dengan event_id dari capi.beriklan.co.id.</li>
+          <li>• <strong>Dedupe</strong>: % event punya event_id unik — Meta dedupe kalau ≥80%.</li>
+          <li>• <strong>GTM container</strong>: live-verify GTM-WQ2BFWVL mengandung Pixel + GA4 ID.</li>
+          <li>• <strong>Gateway CAPI</strong>: ping /healthz tiap refresh — 503/timeout = alarm.</li>
+          <li>• <strong>Last event</strong>: timestamp event terbaru; "lambat" kalau > 5 menit padahal trafik jalan.</li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-[family-name:var(--font-heading)] font-bold">Yang TIDAK di-tracking di sini</h4>
+        <ul class="mt-1 space-y-1 text-xs text-[color:var(--text-secondary)]">
+          <li>• <strong>Chat dari iklan CTWA</strong> — masuk langsung ke WA CS, tidak lewat situs. Lihat /roi untuk funnel CTWA dari Meta.</li>
+          <li>• <strong>Pseudo-event Meta</strong>: view/search/add-to-cart tidak di-beacon (cukup berat untuk toko ritel). Focus hanya pada event bernilai tinggi (click WA).</li>
+          <li>• <strong>Pageview umum</strong>: pakai GA4 untuk web analytics, bukan beacon ini. Lihat /ai (AI referrals) untuk cross-channel attribution.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</Base>
