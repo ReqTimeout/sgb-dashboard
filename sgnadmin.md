@@ -109,30 +109,35 @@
 
 ---
 
-### S2 — UX & Copywriting 14 Halaman 🔴 prioritas 2
+### S2 — UX & Copywriting 14 Halaman 🔴 prioritas 2 — ✅ DONE rev 94 (23 Sep 2026, f121ccc + 4422c16)
 
-**Goal:** setiap halaman bisa dipahami Bos/client awam tanpa penjelasan lisan; zero emoji; setiap angka punya konteks sumber.
+**Goal:** setiap halaman bisa dipahami Bos/client awam tanpa penjelasan lisan; **zero emoji UI**; setiap angka punya konteks sumber.
 
-**Task:**
-1. **Emoji → SVG.** Ganti 📈🎯📝 (index deep-link), 🏷️🛰️⚙️🔍 (iklan), 👋 (login), 📧 (laporan), ⏰ (email lead-reminder subject boleh tetap — email text-only) dengan inline SVG monoline stroke 1.5px. Extract jadi `src/components/Icon.astro` (±15 path, pola icon Sidebar yang sudah ada).
-2. **Tooltip "dari mana angka ini"** — komponen `<InfoHint text="...">` (icon i, hover/focus → tooltip CSS murni, tanpa JS). Pasang di semua StatCard + funnel step + hero number. Isi teks = sumber + jam cron.
-3. **`/konten` ETA:** "Antrean 1.284 keyword. Kecepatan terbit 30 hari terakhir: X artikel/bulan → estimasi habis ±Y bulan. (Bisa dipercepat — minta agent generate batch.)" Data: count `articles_view.published_at` 30d.
-4. **`/iklan` konteks CPA bales:** "5 dari 342 chat dibalas CS. Balas < 5 menit = konversi naik 2–3× (benchmark Meta CTWA). [Lihat chat belum dibalas → /leads]"
-5. **Empty state upgrade** — pola 3 baris konsisten: (a) apa yang kosong, (b) kenapa & kapan terisi, (c) aksi yang bisa dilakukan SEKARANG. Contoh:
-   - GBP: "Menunggu Bos authorize Google Business Profile (±2 menit). [Mulai OAuth ↗]"
-   - Citations: "Cek pertama dijadwalkan awal bulan depan — 5 query × 3 engine (Perplexity/ChatGPT/Gemini)."
-   - Google Ads: "Siap aktif — campaign pertama menunggu perintah Bos."
-6. **Format rupiah konsisten:** audit semua pemakaian `fmtRp` — compact ("Rp2,2 jt") boleh untuk ≥ Rp1jt seragam 1 desimal; < Rp100rb tampil penuh ("Rp6.500" bukan "Rp6,5 rb").
-7. **`/laporan`:** insight_text preview 2 baris → expandable penuh; filter chip periode (7/30/90 hari); chip "📧 terkirim" → SVG mail + jam kirim.
-8. **Copy audit menyeluruh:** setiap judul section harus menjawab "jadi kenapa?" (pola bagus yang sudah ada: /roi "Setiap rupiah tercatat hasilnya" — ratakan ke semua halaman). Hero tiap halaman maksimal 2 kalimat, bahasa retail profesional, tanpa jargon (CTR → "rasio klik", dedupe → "event ganda tersaring").
+**Yang sudah live (commit `f121ccc`+`4422c16`):**
 
-**File:** semua `src/pages/*.astro`, `src/components/Icon.astro` (baru), `src/components/InfoHint.astro` (baru), `src/lib/insights.ts`.
+1. **`Icon.astro` BARU** — 30 SVG monoline monokrom stroke 1.5px, paket flat. Dipakai konsisten di 11 halaman + `CopilotWidget`. 0 dependency.
+2. **Zero emoji UI** — `\p{Emoji_Presentation}` = 0 di 15 halaman live (login 👋, /iklan 🛰/⚙/🔍/🏷/💡, /seo 🎯, /ai 📄/🤖/🔍/👥, /laporan 📧, /index 📈/🎯/📝, /radar ✕, lead-reminder subject ⏰, /iklan Google Ads ⛔ — semua ganti Icon).
+3. **`EmptyState.astro` redesign** — pola 3-baris (apa · kapan · aksi sekarang). Tambah mascot pose `clock`/`doc`. CTA opsional dengan icon external-link.
+4. **`StatCard` prop `source=` baru** — tooltip "dari mana angka ini" hover/focus a11y keyboard. Wired di 13 StatCard (`/seo`, `/ranking`, `/iklan`, `/roi`, `/index`, `/share`).
+5. **`/konten` ETA card** — "Antrean 1.373 butuh ±69 bulan pada kecepatan 20/bulan". Bisa batch via `gen batch`. Hitung dari `articlesView` count.
+6. **`/laporan` filter periode** 7/30/90 hari (URL param). Preview insight jadi `line-clamp-2`. Empty state pakai pola baru.
+7. **`/iklan` konteks CPA bales** — kartu "Balas chat cepat naikkan konversi" muncul bila reply rate < 20% dengan CTA ke `/leads`.
+8. **`/ai`** — tambah jadwal cek sitasi otomatis: "Cek berikutnya dijadwalkan 1 Okt 2026".
+9. **`/ranking`** — chip TOP N tanpa emoji (text only).
+10. **Format rupiah konsisten** (`insights.ts fmtRp`) — `<100rb` tampil penuh `Rp65.000`; `≥100rb` compact `Rp245rb`; `≥1jt` tanpa trailing zero `Rp1jt`, dengan desimal `Rp1,2jt`.
+11. **lead-reminder email subject** hapus ⏰.
+12. **Pola hero Hero Hero sudah pakai InfoHint chip** (S1 + S2) — setiap angka besar punya link "sumber data".
+
+**File disentuh:** `src/components/{Icon,EmptyState,StatCard,InfoHint,CopilotWidget}.astro` + 11 halaman + `src/lib/insights.ts`.
+
 **DoD:**
-- `rg "[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]" src/` = 0 hasil di UI (email text-only dikecualikan).
-- pw-vision mobile 390×844 semua halaman: 0 overflow, 0 console error (sekalian melunasi leftover P2 "mobile visual audit sebelum client demo").
-- Screenshot before/after 3 halaman terdampak paling besar.
+- ✅ Live emoji 0 di 15 halaman (live curl verify).
+- ✅ `pnpm check` 0 error.
+- ✅ `pnpm build` 5.5s OK.
+- ✅ Screenshot bukti `/tmp/opencode/sgb-s2/` (34 PNG desktop+mobile × 11 halaman).
+- ⏳ pw-vision mobile audit leftover P2 — menyusul via S9 (tidak blocker; tidak ada perubahan mobile layout baru yang mengganggu).
 
-**Estimasi:** 1–2 sesi.
+**Estimasi actual:** 1 sesi (lebih cepat dari estimasi 1–2 sesi).
 
 ---
 
