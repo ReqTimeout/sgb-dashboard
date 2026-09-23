@@ -4,33 +4,11 @@ import StatCard from "../components/StatCard.astro";
 import BarChartLC from "../components/BarChartLC.svelte";
 import { getRequestTenant, series, sumRange } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
-import { randomBytes } from "node:crypto";
 import { getDb } from "../lib/db";
 import { sharedLinks } from "../../drizzle/schema";
 import { desc, eq } from "drizzle-orm";
-import type { APIRoute } from "astro";
-
-export const prerender = false;
-export const POST: APIRoute = async ({ request, locals, url }) => {
-  const me = locals.user;
-  if (!me) return new Response("Unauthorized", { status: 401 });
-  const { can } = await import("../lib/auth/session");
-  if (!can(me, "share.create")) return new Response("Forbidden: role Anda read-only.", { status: 403 });
-  const t = await getRequestTenant(url.host, "/share", new URLSearchParams(), me.role === "superadmin");
-  if (!t) return new Response("Tenant tidak ditemukan", { status: 404 });
-  const form = await request.formData();
-  const db2 = getDb();
-  const token = randomBytes(18).toString("hex").slice(0, 32);
-  const label = String(form.get("label") ?? "Laporan publik").slice(0, 64) || "Laporan publik";
-  const days = Math.min(90, Math.max(1, Number(form.get("days") ?? 30)));
-  await db2.insert(sharedLinks).values({
-    tenantId: t.id, token, label,
-    expiresAt: new Date(Date.now() + days * 86400000),
-  });
-  const { logAudit } = await import("../lib/audit");
-  await logAudit({ tenantId: t.id, actor: me.email, action: "share.create", target: `"${label}" · ${days} hari` });
-  return new Response(null, { status: 302, headers: { Location: `/share?msg=created&token=${token}` } });
-};
+// NOTE S8: POST dipindah ke /api/share/create.ts — Astro tidak menjalankan
+// handler POST di file .astro yang juga me-render halaman (request jatuh ke GET).
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -67,7 +45,7 @@ const newToken = Astro.url.searchParams.get("token");
 
   <div class="mt-4 grid gap-4 lg:grid-cols-3">
     {canShare ? (
-    <form method="post" class="card p-5">
+    <form method="post" action="/api/share/create" class="card p-5">
       <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Buat link baru</h2>
       <label class="mt-3 block text-sm">
         <span class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Label</span>
