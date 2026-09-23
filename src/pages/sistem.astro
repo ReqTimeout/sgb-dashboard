@@ -303,7 +303,7 @@ const selectedArticle = articles.find((a) => a.slug === selectedSlug) ?? article
       <a href="/sistem" class="text-xs font-semibold text-[color:var(--info)] hover:underline">Lihat semua 11 tahap lagi</a>
     </div>
     <form method="get" action="/sistem" class="mt-3 flex flex-wrap items-center gap-2">
-      <select name="article" class="flex-1 rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-3 py-1.5 text-sm">
+      <select name="article" class="min-w-0 max-w-full flex-1 truncate rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-3 py-1.5 text-sm">
         {articles.slice(0, 50).map((a) => (
           <option value={a.slug} selected={a.slug === selectedSlug}>{a.title.slice(0, 80)}</option>
         ))}

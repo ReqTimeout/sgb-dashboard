@@ -126,7 +126,7 @@ const visible = (g: Group) => g.items.filter((it) => !it.superadmin || user?.rol
           <div class="text-[10px] text-white/40">{user.role}</div>
         </div>
         <form method="post" action="/api/auth/logout">
-          <button class="rounded-md px-1.5 py-0.5 text-[11px] text-white/40 hover:text-white" title="Keluar">↪</button>
+          <button class="grid h-6 min-w-6 place-items-center rounded-md px-1.5 text-[11px] text-white/40 hover:text-white" title="Keluar">↪</button>
         </form>
       </div>
     ) : (
