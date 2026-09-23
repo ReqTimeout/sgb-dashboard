@@ -312,9 +312,17 @@ API /api/tracking/log:
 
 ---
 
-### S7 — Promo & Iklan Integration 🟡
+### S7 — Promo & Iklan Integration 🟡 — ✅ DONE rev 99 (23 Sep 2026, 76a266e + 247fd23)
 
 **Goal:** landing promo toko = senjata iklan terukur, bukan kartu misterius yang dikira "promo landing di dashboard".
+
+**HASIL LIVE ( diverifikasi curl + SSH + Playwright, 23 Sep 2026 sore):**
+- Kartu promo /iklan: 3 promo live, semua chip `belum diiklankan` (DB: 0 dari 2 lead 30d berasal dari /promo/ — angka jujur, bukan bug).
+- Salin link UTM ×3 ter-render + terhidrasi (preset select 5 opsi), toast via svelte-sonner, log `iklan.utm_copy` masuk audit_log (row id=2, verified via SSH).
+- Pause dry-run API: 500 jujur "META_TOKEN belum diset" → UI otomatis tampilkan fallback mailto agency (bukan tombol mati).
+- Filter /leads?promo=besi-8-hari-pelanggan: chips 3 slug + banner filter aktif.
+- Overflow 0 (desktop+mobile), console error 0, pnpm check 0 error.
+- ⛔ Pause NYATA pertama kali = tunggu konfirmasi Bos di chat dulu (UX sudah siap, eksekusi ditahan).
 
 **Task:**
 1. **Relabel kartu /iklan:** "🏷️ Promo aktif" → **"Landing siap diiklankan"** + subjudul "Halaman tujuan iklan — dibuat di admin toko, tinggal dipasang di campaign Meta/Google. Dashboard ini tidak punya landing sendiri." Tiap promo tambah:
