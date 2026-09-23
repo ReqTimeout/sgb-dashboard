@@ -121,13 +121,17 @@ const roleColor: Record<string, string> = {
       <p class="px-5 py-6 text-center text-sm text-[color:var(--text-faint)]">Belum ada aktivitas tercatat — aksi tulis (deal, bulk, pause, UTM, share, notes, radar) muncul di sini otomatis.</p>
     ) : (
     <ul class="divide-y divide-[color:var(--border-subtle)]">
-      {recentAudit.map((a) => (
+      {recentAudit.map((a) => {
+        const d = new Date(a.ts);
+        const tsStr = isNaN(d.getTime()) ? "—" : `${String(d.getDate()).padStart(2, "0")} ${["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"][d.getMonth()]} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        return (
         <li class="flex items-center gap-3 px-5 py-2 text-sm">
-          <span class="font-[family-name:var(--font-mono-num)] text-[11px] text-[color:var(--text-faint)]">{String(a.ts).slice(5, 16).replace("T", " ")}</span>
+          <span class="font-[family-name:var(--font-mono-num)] text-[11px] text-[color:var(--text-faint)]">{tsStr}</span>
           <span class="min-w-0 flex-1 truncate"><strong class="font-mono text-[11px]">{a.action}</strong> <span class="text-[color:var(--text-muted)]">· {a.target ?? "—"}</span></span>
           <span class="shrink-0 truncate text-[11px] text-[color:var(--text-faint)]">{a.actor}</span>
         </li>
-      ))}
+        );
+      })}
     </ul>
     )}
   </div>
