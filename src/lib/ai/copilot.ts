@@ -179,6 +179,15 @@ export async function generateCopilot(tenantId: number): Promise<{ actions: Copi
   }
 
   // S8: alert positif/operasional untuk bell (di luar action list utama).
+  // Sumber: cron error 24h (admin) + deal baru + artikel hari ini + TOP3.
+  try {
+    const { fetchCronHealth } = await import("../admin-crons");
+    const ch = await fetchCronHealth();
+    const bad = ch.crons.filter((c) => c.ok === false);
+    if (bad.length > 0) {
+      pushAlert({ id: "cron-err", title: `${bad.length} cron error 24 jam terakhir`, href: "/health", severity: "warn" });
+    }
+  } catch { /* admin down — skip sumber ini */ }
   try {
     const today = todayISO(0);
     // Deal baru 24 jam terakhir
