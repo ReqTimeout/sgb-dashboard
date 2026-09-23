@@ -1,0 +1,174 @@
+---
+// PipelineNode — 1 tahap dalam pipeline animasi /sistem.
+// CSS-native animation (offset-path + dashoffset + pulse). 0 JS.
+//
+// Layout: kartu bulat w/ icon SVG, status dot (hijau pulse / abu / merah),
+// judul, angka live, sub-line (cron schedule), "terakhir sukses X lalu" (relatif).
+//
+// Args (semua opsional kecuali `stage` 1-11 dan `title`):
+//   stage: angka 01-11
+//   icon: name dari Icon.astro (path monoline)
+//   title: judul pendek node
+//   value: angka/huruf besar (mis. "1.284")
+//   valueLabel: sub-line di bawah angka
+//   schedule: jadwal cron (mis. "/30m" atau "tiap pagi 06:30")
+//   status: "live" | "idle" | "error" | "pending"
+//   lastSuccessISO: ISO timestamp terakhir sukses (relatif)
+//   description: 1-bar penjelasan (untuk tooltip)
+//   href: optional link tujuan
+import Icon from "./Icon.astro";
+
+interface Props {
+  stage: number;
+  icon: "inbox" | "edit" | "check" | "send" | "rocket" | "search" | "sparkles" | "shield" | "trend-up" | "mail";
+  title: string;
+  value?: string;
+  valueLabel?: string;
+  schedule?: string;
+  status?: "live" | "idle" | "error" | "pending";
+  lastSuccessISO?: string | null;
+  description?: string;
+  href?: string;
+}
+const { stage, icon, title, value, valueLabel, schedule, status = "idle", lastSuccessISO, description, href } = Astro.props;
+
+function ago(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "—";
+  const min = Math.round((Date.now() - t) / 60_000);
+  if (min < 1) return "beberapa detik lalu";
+  if (min < 60) return `${min} menit lalu`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} jam lalu`;
+  const day = Math.round(hr / 24);
+  return `${day} hari lalu`;
+}
+
+const statusInfo: Record<string, { color: string; label: string; pulse: boolean }> = {
+  live:    { color: "var(--success)", label: "Jalan",   pulse: true  },
+  idle:    { color: "var(--text-faint)", label: "Idle",  pulse: false },
+  error:   { color: "var(--danger)",  label: "Error",  pulse: true  },
+  pending: { color: "var(--warning)", label: "Menunggu", pulse: true },
+};
+
+const s = statusInfo[status];
+const timeAgo = ago(lastSuccessISO);
+const Tag = href ? "a" : "div";
+const tagProps = href ? { href } : {};
+---
+<Tag
+  class="pipeline-node group block"
+  data-stage={stage}
+  title={description}
+  {...tagProps}
+>
+  <div class="stage-badge font-[family-name:var(--font-mono-num)] text-[10px] font-extrabold" style={`color: ${s.color}`}>
+    {String(stage).padStart(2, "0")}
+  </div>
+  <div class="node-icon-wrap">
+    <span
+      class="node-icon"
+      style={`color: ${status === "error" ? "var(--danger)" : "var(--brand)"}`}
+    >
+      <Icon name={icon} size="md" strokeWidth={1.75} />
+    </span>
+    <span class="status-dot" class:list={["status-dot", s.pulse && "pulse-anim"]} style={`background: ${s.color}`}></span>
+  </div>
+  <div class="min-w-0 flex-1">
+    <div class="flex items-center gap-1.5">
+      <h3 class="font-[family-name:var(--font-heading)] text-sm font-bold leading-tight">{title}</h3>
+      <span
+        class="rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider"
+        style={`color: ${s.color}; background: color-mix(in srgb, ${s.color} 12%, transparent)`}
+      >
+        {s.label}
+      </span>
+    </div>
+    {value && (
+      <div class="mt-0.5 flex items-baseline gap-1.5">
+        <span class="font-[family-name:var(--font-display)] text-xl font-extrabold leading-none">{value}</span>
+        {valueLabel && <span class="text-[10px] text-[color:var(--text-muted)]">{valueLabel}</span>}
+      </div>
+    )}
+    {(schedule || lastSuccessISO) && (
+      <div class="mt-0.5 truncate text-[10px] text-[color:var(--text-faint)] font-mono">
+        {schedule && <span>{schedule}</span>}
+        {schedule && lastSuccessISO && <span class="mx-1 opacity-50">·</span>}
+        {timeAgo && lastSuccessISO && <span>terakhir: {timeAgo}</span>}
+      </div>
+    )}
+  </div>
+</Tag>
+
+<style>
+  .pipeline-node {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.85rem 1rem;
+    border-radius: 14px;
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    transition: transform 220ms var(--ease-out-quint), border-color 220ms var(--ease-out-quint), box-shadow 220ms var(--ease-out-quint);
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    z-index: 1;
+  }
+  .pipeline-node:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover, 0 8px 20px -4px rgba(0,0,0,0.12));
+    border-color: var(--border-strong);
+  }
+  .pipeline-node:focus-visible {
+    outline: 2px solid var(--safety, #FACC15);
+    outline-offset: 3px;
+  }
+
+  .stage-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--bg-surface-2);
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+  }
+
+  .node-icon-wrap {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--brand) 8%, var(--bg-surface-2));
+    display: grid;
+    place-items: center;
+  }
+  .node-icon {
+    display: grid;
+    place-items: center;
+    opacity: 0.85;
+    transition: transform 220ms var(--ease-out-quint);
+  }
+  .pipeline-node:hover .node-icon {
+    transform: scale(1.08);
+  }
+
+  .status-dot {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 2px solid var(--bg-surface);
+  }
+  .pulse-anim {
+    animation: node-pulse 2.4s var(--ease-out-quint) infinite;
+  }
+
+  /* Connector line — di luar node, controlled by parent pipeline-SVG */
+</style>

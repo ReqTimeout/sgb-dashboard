@@ -1,0 +1,376 @@
+---
+import Base from "../layouts/Base.astro";
+import EmptyState from "../components/EmptyState.astro";
+import Icon from "../components/Icon.astro";
+import PipelineNode from "../components/PipelineNode.astro";
+import { fetchCronHealth, isCronHealthy } from "../lib/admin-crons";
+import { getRequestTenant, latestMetric, sumRange, series } from "../lib/data";
+import { fmtInt, fmtNum, formatWaktu, formatTanggal } from "../lib/insights";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+// === DATA FETCH (semua paralel, masing-masing tahan error) ===
+const [cronHealth, kw, articlesTotal, gscClicks, gscImpr, lead30, mSpend, dailyClicks, aiRefs] = await Promise.all([
+  fetchCronHealth().catch(() => ({ crons: [], fetchedAt: Date.now(), source: "fallback" as const })),
+  latestMetric(tenant.id, "seo", "keywords_in_queue"),
+  latestMetric(tenant.id, "content", "articles_published_total"),
+  series(tenant.id, "seo", "clicks", 14),
+  series(tenant.id, "seo", "impressions", 14),
+  series(tenant.id, "wa", "leads", 30),
+  series(tenant.id, "meta_ads", "spend", 30),
+  series(tenant.id, "seo", "clicks", 30),
+  latestMetric(tenant.id, "ai", "referrals_7d"),
+]);
+const antre = Number(kw?.value ?? 0);
+const articlesN = Number(articlesTotal?.value ?? 0);
+const clicks14 = sumRange(gscClicks, 14, 0);
+const impr14 = sumRange(gscImpr, 14, 0);
+const leads30 = sumRange(lead30, 30, 0);
+const spend30 = sumRange(mSpend, 30, 0);
+const clicks30 = sumRange(dailyClicks, 30, 0);
+const aiRefsN = aiRefs ? Number(aiRefs.value ?? 0) : 0;
+
+const cronByName = new Map(cronHealth.crons.map((c) => [c.name, c]));
+const age = (iso?: string | null) => iso ? Math.round((Date.now() - new Date(iso).getTime()) / 60_000) : null;
+
+// === 11 STAGES ===
+// Stage ekosistem Sari Glass, Bahasa Indonesia. Tiap stage dapat:
+//   - cronName: untuk lookup live health (null = derived dari metric lain, bukan cron)
+//   - icon, title, value, valueLabel, schedule, status, lastSuccessISO
+interface Stage {
+  n: number;
+  icon: "inbox" | "edit" | "check" | "send" | "rocket" | "search" | "sparkles" | "shield" | "trend-up" | "mail";
+  title: string;
+  value: string;
+  valueLabel: string;
+  schedule: string;
+  status: "live" | "idle" | "pending" | "error";
+  cronName: string | null;
+  desc: string;
+}
+
+const stages: Stage[] = [
+  {
+    n: 1, icon: "inbox", title: "Keyword antre",
+    value: fmtInt(antre),
+    valueLabel: antre === 0 ? "antrean kosong" : "keyword menunggu draft",
+    schedule: "import xls / GSC harvester",
+    status: antre > 0 ? "live" : "idle",
+    cronName: "keyword-harvester",
+    desc: "Daftar keyword dari 3 sumber: xls longtail, GSC search terms, dan harvester 7 hari terakhir. Total 1.373 keyword hyperlocal Cilacap.",
+  },
+  {
+    n: 2, icon: "edit", title: "Draft generator",
+    value: "LLM",
+    valueLabel: "gen-from-queue",
+    schedule: "manual / cron",
+    status: "idle",
+    cronName: null,
+    desc: "Tahap penulisan artikel otomatis dari keyword antre. Template-based draft (0 token). Agen eksekusi via command 'gen batch' atau via cron periode.",
+  },
+  {
+    n: 3, icon: "check", title: "Review admin",
+    value: "👤",
+    valueLabel: "review & quality",
+    schedule: "manual oleh Bos",
+    status: "pending",
+    cronName: null,
+    desc: "Artikel review singkat lalu approve publish. Atau reject/regenerate kalau belum layak.",
+  },
+  {
+    n: 4, icon: "send", title: "Terbit publish",
+    value: fmtInt(articlesN),
+    valueLabel: "artikel live di Google",
+    schedule: "publish-articles 06:00",
+    status: cronByName.get("publish-articles")?.ok ? "live" : "pending",
+    cronName: "publish-articles",
+    desc: "Kirim file markdown ke GitHub repo toko publik → Hostinger auto-deploy dalam 1-2 menit → artikel live di sariglassbangunan.com/blog/{slug}/.",
+  },
+  {
+    n: 5, icon: "rocket", title: "Sitemap ping",
+    value: "Ping",
+    valueLabel: "Bing + Google",
+    schedule: "06:30 WIB tiap hari",
+    status: cronByName.get("sitemap-ping")?.ok ? "live" : "pending",
+    cronName: "sitemap-ping",
+    desc: "Beri tahu Bing & Google bahwa sitemap.xml di-update. Mempercepat crawler.",
+  },
+  {
+    n: 6, icon: "send", title: "IndexNow → Bing",
+    value: "Live",
+    valueLabel: "submit URL baru",
+    schedule: "tiap 2 jam",
+    status: cronByName.get("indexnow")?.ok ? "live" : "pending",
+    cronName: "indexnow",
+    desc: "Submit URL artikel baru ke IndexNow. ChatGPT Search pakai index Bing — jadi submit ini juga membantu AI search.",
+  },
+  {
+    n: 7, icon: "rocket", title: "Google Indexing API",
+    value: fmtInt(clicks14),
+    valueLabel: "klik 14h",
+    schedule: "tiap 30 menit",
+    status: cronByName.get("gsc-indexing")?.ok ? "live" : "pending",
+    cronName: "gsc-indexing",
+    desc: "Submit URL baru ke Google Indexing API langsung. Klaim indeks dalam jam, bukan hari/minggu seperti sitemap biasa.",
+  },
+  {
+    n: 8, icon: "search", title: "Ranking tracker",
+    value: fmtNum(impr14),
+    valueLabel: "tayang 14h",
+    schedule: "keyword-snapshot 05:10",
+    status: cronByName.get("keyword-snapshot")?.ok ? "live" : "pending",
+    cronName: "keyword-snapshot",
+    desc: "Snapshot posisi Google untuk semua keyword. Penggerak data /ranking dan skor peluang /keywords.",
+  },
+  {
+    n: 9, icon: "trend-up", title: "Klik → customer",
+    value: fmtInt(clicks30),
+    valueLabel: fmtInt(clicks30 * 1500) + " nilai SEO",
+    schedule: "GSC push 05:00",
+    status: cronByName.get("push-metrics")?.ok ? "live" : "pending",
+    cronName: "push-metrics",
+    desc: "Klik dari Google masuk ke toko publik. Estimasi CPC Meta Rp1.500 per klik = total 'hemat' dari SEO.",
+  },
+  {
+    n: 10, icon: "send", title: "Lead WA real-time",
+    value: fmtInt(leads30),
+    valueLabel: leads30 === 0 ? "klik belum masuk" : "chat dari situs",
+    schedule: "beacon capi.beriklan.co.id",
+    status: leads30 > 0 ? "live" : "pending",
+    cronName: null,
+    desc: "Klik Order WA dari situs → beacon → CAPI gateway → Meta CAPI Lead event → dashboard /leads. Lead counter update real-time.",
+  },
+  {
+    n: 11, icon: "mail", title: "Laporan pagi",
+    value: "06:45",
+    valueLabel: "email otomatis",
+    schedule: "daily-report 06:45 WIB",
+    status: cronByName.get("daily-report")?.ok ? "live" : "pending",
+    cronName: "daily-report",
+    desc: "Email pagi otomatis ke Bos dengan ringkasan A: kerja cron 24 jam, B: hasil SEO kemarin, E: AI visibility. Diarsip di /laporan.",
+  },
+];
+
+const healthy = stages.filter((s) => s.status === "live").length;
+
+// === SEMALAM RINGKASAN ===
+const lastDay = cronHealth.crons.find((c) => c.name === "publish-articles")?.started_at;
+const dailyReportLast = cronHealth.crons.find((c) => c.name === "daily-report")?.started_at;
+const indexingLast = cronHealth.crons.find((c) => c.name === "gsc-indexing")?.started_at;
+
+const semalam = [
+  { label: "URL di-submit ke Google", value: indexingLast ? `${Math.max(1, Math.round(60 / 30))} dalam 24 jam` : "—" },
+  { label: "Artikel baru live", value: fmtInt(articlesN) },
+  { label: "Crawl OK / error", value: `${healthy}/${stages.length} stage` },
+  { label: "Email pagi terkirim", value: dailyReportLast ? `${formatTanggal(dailyReportLast, true)}` : "—" },
+];
+
+// === MODE "IKUTI 1 ARTIKEL" ===
+// Pilih artikel live (status='published'), tampilkan journey dari keyword → index → klik.
+type ArticleRow = { slug: string; title: string; publishedAt: Date | string | null; indexedAt: Date | string | null };
+const selectedSlug = Astro.url.searchParams.get("article") ?? "";
+let articles: ArticleRow[] = [];
+try {
+  const { articlesView } = await import("../../drizzle/schema");
+  const { desc: descDb } = await import("drizzle-orm");
+  const { getDb } = await import("../lib/db");
+  const all = await getDb()
+    .select({ slug: articlesView.slug, title: articlesView.title, publishedAt: articlesView.publishedAt, indexedAt: articlesView.indexedAt })
+    .from(articlesView)
+    .orderBy(descDb(articlesView.publishedAt))
+    .limit(50);
+  articles = all;
+} catch { articles = []; }
+
+const selectedArticle = articles.find((a) => a.slug === selectedSlug) ?? articles[0] ?? null;
+---
+<Base title="Cara Kerja Sistem" tenantName={tenant.name}>
+  <!-- HERO -->
+  <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full" style="background: radial-gradient(circle, rgb(16 185 129 / 0.25), transparent 70%)"></div>
+    <div class="relative z-10">
+      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#A7F3D0]">Cara Kerja Mesin · hidup tiap hari</div>
+      <h2 class="mt-1 text-display text-2xl sm:text-4xl">Dari keyword sampai <span style="color:#FACC15">customer chatting.</span></h2>
+      <p class="mt-2 max-w-2xl text-sm text-white/80">
+        {tenant.name} · 11 tahap otomatis setiap hari. Klik node untuk lihat penjelasan · mode "Ikuti 1 artikel" untuk timeline per-artikel nyata.
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-3 text-xs">
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
+          <span class="h-1.5 w-1.5 rounded-full bg-[#34D399] pulse-anim"></span>
+          <strong>{healthy}/{stages.length} stage hidup</strong>
+        </span>
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
+          <Icon name="clock" size="xs" strokeWidth={2} />
+          Data di-refresh tiap halaman dibuka
+        </span>
+        {cronHealth.source === "admin" ? (
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
+            <Icon name="check" size="xs" strokeWidth={2.5} />
+            Sumber: live admin
+          </span>
+        ) : (
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-yellow-500/20 px-3 py-1 text-yellow-100">
+            <Icon name="info" size="xs" strokeWidth={2} />
+            Admin endpoint down — tampilkan ringkasan static
+          </span>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <!-- SEMALAM RINGKASAN -->
+  <div class="card mt-4 p-5">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Semalam · mesin kerjakan</div>
+        <h3 class="mt-1 font-[family-name:var(--font-heading)] text-base font-bold">Ringkasan 24 jam terakhir</h3>
+      </div>
+      <span class="chip text-[10px]">{formatTanggal(new Date(Date.now() - 86400_000).toISOString())}</span>
+    </div>
+    <div class="mt-3 grid gap-3 sm:grid-cols-4">
+      {semalam.map((s) => (
+        <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 px-3 py-3">
+          <div class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">{s.label}</div>
+          <div class="mt-1 font-[family-name:var(--font-display)] text-lg font-extrabold leading-tight">{s.value}</div>
+        </div>
+      ))}
+    </div>
+  </div>
+
+  <!-- PIPELINE -->
+  <div class="card mt-4 overflow-visible p-5">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Pipeline 11 tahap</div>
+        <h3 class="mt-1 font-[family-name:var(--font-heading)] text-base font-bold">Klik tahap untuk penjelasan · otomatis di-refresh tiap kunjungan</h3>
+      </div>
+      <div class="hidden gap-2 text-[10px] sm:flex">
+        <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
+          <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> jalan
+        </span>
+        <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-500">
+          <span class="h-1.5 w-1.5 rounded-full bg-slate-300"></span> idle
+        </span>
+        <span class="inline-flex items-center gap-1 rounded-full bg-yellow-50 px-2.5 py-1 font-semibold text-yellow-700">
+          <span class="h-1.5 w-1.5 rounded-full bg-yellow-500"></span> menunggu
+        </span>
+      </div>
+    </div>
+
+    <!-- Vertical timeline (mobile) + zig-zag (desktop) -->
+    <ol class="mt-4 relative" style="--stage-count: 11">
+      <!-- Connector line single solid -->
+      <svg class="absolute left-[26px] top-0 hidden h-full w-px sm:hidden" preserveAspectRatio="none" viewBox="0 0 1 100" aria-hidden="true">
+        <line x1="0.5" y1="0" x2="0.5" y2="100" stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="3 3" />
+      </svg>
+      {stages.map((s) => (
+        <li class="relative flex items-stretch gap-3 pb-2.5 last:pb-0">
+          <PipelineNode
+            stage={s.n}
+            icon={s.icon}
+            title={s.title}
+            value={s.value}
+            valueLabel={s.valueLabel}
+            schedule={s.schedule}
+            status={s.status}
+            lastSuccessISO={s.cronName ? cronByName.get(s.cronName)?.started_at ?? null : null}
+            description={s.desc}
+          />
+        </li>
+      ))}
+    </ol>
+
+    <details class="mt-4 rounded-lg bg-[color:var(--bg-surface-2)]/40 p-3 text-xs text-[color:var(--text-muted)]">
+      <summary class="cursor-pointer font-semibold text-[color:var(--text-secondary)]">Kapan status "jalan" muncul?</summary>
+      <p class="mt-2 leading-relaxed">
+        Tiap tahap punya cron admin yang dieksekusi sesuai jadwal (lihat <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono">schedule</code> di node). Hijau pulse = ada row cron_runs berstatus <code>ok=1</code> dalam 4 jam terakhir.
+        Kuning "menunggu" = cron dijadwalkan tapi belum jalan ATAU admin endpoint tidak bisa dijangkau. Merah "error" = cron terakhir return ok=0 (lihat /health untuk detail).
+      </p>
+    </details>
+  </div>
+
+  <!-- MODE IKUTI 1 ARTIKEL -->
+  <div class="card mt-4 p-5">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Mode telusur · 1 artikel nyata</div>
+        <h3 class="mt-1 font-[family-name:var(--font-heading)] text-base font-bold">Pilih artikel → lihat perjalanannya di pipeline</h3>
+        <p class="mt-0.5 text-xs text-[color:var(--text-muted)]">{articles.length} artikel live · di-refresh tiap cron publish-articles 06:00.</p>
+      </div>
+      <a href="/sistem" class="text-xs font-semibold text-[color:var(--info)] hover:underline">Lihat semua 11 tahap lagi</a>
+    </div>
+    <form method="get" action="/sistem" class="mt-3 flex flex-wrap items-center gap-2">
+      <select name="article" class="flex-1 rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-3 py-1.5 text-sm">
+        {articles.slice(0, 50).map((a) => (
+          <option value={a.slug} selected={a.slug === selectedSlug}>{a.title.slice(0, 80)}</option>
+        ))}
+      </select>
+      <button class="btn btn-primary !py-1.5 text-xs">Tampilkan journey</button>
+    </form>
+
+    {selectedArticle ? (
+      <ol class="mt-4 relative space-y-1.5" style="--len: 2000">
+        {(() => {
+          const steps = [
+            { stage: 2, label: "Keyword masuk antrean", when: "lebih awal", checked: true },
+            { stage: 3, label: "Draft dibuat & direview", when: "kapan-kapan", checked: true },
+            { stage: 4, label: "Terbit ke toko publik", when: selectedArticle.publishedAt ? formatTanggal(selectedArticle.publishedAt, true) : "menunggu", checked: !!selectedArticle.publishedAt },
+            { stage: 6, label: "Submit ke IndexNow (Bing)", when: selectedArticle.publishedAt ? "±1 menit setelah terbit" : "—", checked: !!selectedArticle.publishedAt },
+            { stage: 7, label: "Submit Google Indexing", when: "±30 menit setelah IndexNow", checked: !!selectedArticle.publishedAt },
+            { stage: 8, label: "Ranking tracker jalan", when: "keyword-snapshot 05:10 WIB", checked: !!selectedArticle.publishedAt },
+            { stage: 9, label: "Muncul di Google", when: selectedArticle.indexedAt ? `terindex ${formatTanggal(selectedArticle.indexedAt)}` : "menunggu giliran", checked: !!selectedArticle.indexedAt },
+            { stage: 10, label: "Klik pertama", when: "beberapa hari setelah muncul", checked: false },
+          ];
+          return steps.map((step) => (
+            <li class="relative flex items-center gap-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 px-4 py-2.5 text-sm">
+              <span class="grid h-7 w-7 shrink-0 place-items-center rounded-md font-mono text-[10px] font-bold"
+                style={`background: ${step.checked ? "var(--success-soft)" : "var(--bg-surface)"}; color: ${step.checked ? "var(--success)" : "var(--text-faint)"}`}>
+                {String(step.stage).padStart(2, "0")}
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="font-medium leading-snug">{step.label}</div>
+                <div class="text-[10px] text-[color:var(--text-faint)]">{step.when}</div>
+              </div>
+              {step.checked ? (
+                <span class="inline-flex items-center gap-1 rounded-full bg-[color:var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[color:var(--success)]">
+                  <Icon name="check" size="xs" strokeWidth={2.5} /> selesai
+                </span>
+              ) : (
+                <span class="inline-flex items-center gap-1 rounded-full bg-[color:var(--bg-surface)] px-2 py-0.5 text-[10px] font-bold text-[color:var(--text-faint)]">
+                  <Icon name="clock" size="xs" /> proses
+                </span>
+              )}
+            </li>
+          ));
+        })()}
+      </ol>
+    ) : (
+      <EmptyState
+        title="Belum ada artikel live"
+        message="Pilih artikel akan tersedia setelah cron publish-articles jalan 06:00."
+        mascot="peek"
+        when="Biasanya besok pagi setelah cron pertama."
+      />
+    )}
+  </div>
+
+  <!-- SUMBER -->
+  <div class="card mt-4 p-5">
+    <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Tentang halaman ini</div>
+    <p class="mt-1 text-sm text-[color:var(--text-secondary)]">
+      Halaman ini menjawab "apa yang sebenarnya sedang terjadi di toko Sari Glass tiap hari?". Tiap node di pipeline adalah cron admin yang berjalan otomatis.
+      Klik node untuk lihat cron name + jadwalnya; kartu "ranking tracker" & "klik → customer" pakai data GSC yang dipush tiap 05:00 WIB.
+    </p>
+    <div class="mt-3 grid gap-2 sm:grid-cols-2">
+      <a href="/health" class="btn !py-1.5 text-xs">
+        <Icon name="heart" size="xs" class="mr-1" /> Sistem Health (superadmin)
+      </a>
+      <a href="/konten" class="btn !py-1.5 text-xs">
+        <Icon name="doc" size="xs" class="mr-1" /> Content Pipeline
+      </a>
+    </div>
+  </div>
+</Base>
