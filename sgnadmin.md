@@ -344,7 +344,14 @@ API /api/tracking/log:
 
 ---
 
-### S8 — Engagement & Trust (bikin user balik tiap hari) 🟢
+### S8 — Engagement & Trust (bikin user balik tiap hari) 🟢 — ✅ DONE rev 100 (23 Sep 2026, c114d84 + 404cc79 + 6dc5b25 + b26217c)
+
+**HASIL LIVE (diverifikasi curl + SSH + Playwright):**
+- Bell: `alerts[]` live (warn → badge merah; sempat tampil 1 alert nyata "1 lead belum dibalas" dari data real).
+- Role: viewer 6/6 POST → 403; client boleh pipeline+share; UI hide terverifikasi (curl + screenshot).
+- audit_log: 5+ rows live, tampil di /health (format tanggal diperbaiki).
+- Keys sudah beda per tenant (verified, tanpa rotasi). rotate-key.ts tersedia dry-run default.
+- BUGFIX: share POST `.astro`→`/api/share/create.ts`; `/api/iklan/` keluar PUBLIC_PREFIXES.
 
 **Task:**
 1. **Bell fungsional:** dropdown 5 alert terbaru — sumber: rule-engine copilot yang SUDAH ada (lead > 12h belum dibalas · cron error 24h · artikel terbit hari ini · keyword masuk TOP3 · deal baru). Extend `/api/copilot` dengan field `alerts[]` (severity + link). Badge merah = count severity tinggi. Klik alert → deep-link.
@@ -368,7 +375,13 @@ API /api/tracking/log:
 
 ---
 
-### S9 — QA Final + Dokumentasi 🟢
+### S9 — QA Final + Dokumentasi 🟢 — ✅ DONE rev 101 (23 Sep 2026)
+
+**HASIL:**
+- Sweep 16 halaman × 2 viewport: 32/32 HTTP 200, 0 console error, /keywords 94KB, lainnya <80KB.
+- Fix: overflow mobile /sistem (select + PipelineNode min-w-0) + /ai (scroll wrapper) + tap target.
+- E2E penuh dijalankan; TEMUAN KRITIS: beacon browser 403 di gateway (no-cors strip header) → fix `?key=` di gateway (40dd9d4, LIVE) + beacon (0028f4e, butuh rebuild+upload hPanel oleh Bos).
+- Docs: README + documentation-admin.md §8.5 + WORK-PHASES rev 100/101 + file ini.
 
 **Task:**
 1. **pw-vision full sweep:** 16 halaman (14 lama + /sistem + /tracking) × mobile 390×844 + desktop 1440×900 → 0 overflow, 0 console error, 0 HTTP ≥ 400, small targets < 24px hanya elemen non-aksi.
