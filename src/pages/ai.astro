@@ -1,6 +1,5 @@
 ---
 import Base from "../layouts/Base.astro";
-import StatCard from "../components/StatCard.astro";
 import EmptyState from "../components/EmptyState.astro";
 import Icon from "../components/Icon.astro";
 import { getRequestTenant, latestMetric } from "../lib/data";
@@ -8,40 +7,64 @@ import { fmtInt, formatTanggal } from "../lib/insights";
 import { getDb } from "../lib/db";
 import { aiCitations } from "../../drizzle/schema";
 import { desc, eq } from "drizzle-orm";
+import { fetchAiCronSummary, AI_CRON_SCHEDULE, nextAiCitationCheck } from "../lib/admin-crons-ai";
+
+function ago(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "—";
+  const d = Math.max(0, Date.now() - t);
+  if (d < 60_000) return `${Math.max(1, Math.round(d / 1000))} dtk lalu`;
+  if (d < 3_600_000) return `${Math.round(d / 60_000)} mnt lalu`;
+  if (d < 86_400_000) return `${Math.round(d / 3_600_000)} jam lalu`;
+  return `${Math.round(d / 86_400_000)} hari lalu`;
+}
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 
-const aiRefs = await latestMetric(tenant.id, "ai", "referrals_7d");
-const citations = await getDb()
-  .select()
-  .from(aiCitations)
-  .where(eq(aiCitations.tenantId, tenant.id))
-  .orderBy(desc(aiCitations.checkedAt))
-  .limit(30);
-const lastChecked = citations[0]?.checkedAt ?? null;
-const llmsTxtUrl = "https://sariglassbangunan.com/llms.txt";
-const robotsUrl = "https://sariglassbangunan.com/robots.txt";
+const [aiRefs, citations, cronSummary] = await Promise.all([
+  latestMetric(tenant.id, "ai", "referrals_7d"),
+  getDb()
+    .select()
+    .from(aiCitations)
+    .where(eq(aiCitations.tenantId, tenant.id))
+    .orderBy(desc(aiCitations.checkedAt))
+    .limit(30),
+  fetchAiCronSummary().catch(() => null),
+]);
 
-// Verifikasi LIVE langsung ke situs (bukan klaim statis)
+const lastChecked = citations[0]?.checkedAt ?? null;
+const aiRefsValue = aiRefs ? Number(aiRefs.value ?? 0) : 0;
+const nextCheck = nextAiCitationCheck();
+const nextCheckStr = formatTanggal(nextCheck.toISOString(), true);
+
+// Live verify robots + llms.txt
+const STORE = "https://sariglassbangunan.com";
 let llmsSize = 0;
+let llmsFirstLine = "";
 let aiAgents: string[] = [];
 try {
-  const r1 = await fetch("https://sariglassbangunan.com/llms.txt");
-  if (r1.ok) llmsSize = (await r1.text()).length;
-  const r2 = await fetch("https://sariglassbangunan.com/robots.txt");
+  const [r1, r2] = await Promise.all([
+    fetch(`${STORE}/llms.txt`, { signal: AbortSignal.timeout(6000) }),
+    fetch(`${STORE}/robots.txt`, { signal: AbortSignal.timeout(6000) }),
+  ]);
+  if (r1.ok) {
+    const body = await r1.text();
+    llmsSize = body.length;
+    llmsFirstLine = body.split("\n")[0]?.trim().slice(0, 80) ?? "";
+  }
   if (r2.ok) {
     const t = await r2.text();
     const m = t.match(/^User-agent:\s*(\S+)/gim) ?? [];
     aiAgents = [...new Set(m.map((s) => s.replace(/^User-agent:\s*/i, "").trim()))].filter((a) => a !== "*");
   }
-} catch { /* offline — tampilkan klaim terakhir */ }
+} catch { /* offline */ }
 
-// Jadwal sitasi berikutnya: awal bulan depan.
-const today = new Date();
-const nextCheck = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-const nextCheckStr = formatTanggal(nextCheck.toISOString());
+const lastLlmCron = cronSummary?.llm;
+const lastLlmOk = lastLlmCron?.ok ?? false;
+const lastLlmAt = lastLlmCron?.started_at ?? null;
 
 const items = [
   {
@@ -49,50 +72,139 @@ const items = [
     title: "llms.txt",
     big: llmsSize > 0 ? `${(llmsSize / 1024).toFixed(0)}KB live` : "Live",
     sub: llmsSize > 0
-      ? `Terverifikasi barusan: ${(llmsSize / 1024).toFixed(1)}KB komprehensif (produk, brand, area, artikel, FAQ). Dicek tiap 12 jam oleh cron llm-search-ping.`
+      ? `Terverifikasi barusan · ${(llmsSize / 1024).toFixed(1)}KB. ${llmsFirstLine ? `Header: "${llmsFirstLine}"` : ""}`
       : "24KB komprehensif (produk, brand, area, artikel, FAQ). Dicek tiap 12 jam oleh cron llm-search-ping.",
-    href: llmsTxtUrl,
+    href: `${STORE}/llms.txt`,
     hrefLabel: "Lihat file",
     ok: llmsSize > 5000,
+    lastVerified: lastLlmAt,
   },
   {
     iconName: "user" as const,
     title: "Izin crawler AI",
     big: aiAgents.length > 0 ? `${aiAgents.length} agen` : "13/13",
     sub: aiAgents.length > 0
-      ? `Terverifikasi barusan dari robots.txt: ${aiAgents.slice(0, 8).join(", ")}${aiAgents.length > 8 ? ` +${aiAgents.length - 8} lagi` : ""}.`
-      : "GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, Bytespider diizinkan robots.txt.",
-    href: robotsUrl,
+      ? `Dari robots.txt: ${aiAgents.slice(0, 8).join(", ")}${aiAgents.length > 8 ? ` +${aiAgents.length - 8} lagi` : ""}.`
+      : "GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, Bytespider diizinkan di robots.txt.",
+    href: `${STORE}/robots.txt`,
     hrefLabel: "Cek robots",
     ok: aiAgents.length > 0,
+    lastVerified: lastLlmAt,
   },
   {
     iconName: "search" as const,
     title: "IndexNow → Bing",
     big: "Aktif",
-    sub: "Submit tiap 2 jam + Bing Webmaster API. ChatGPT Search pakai index Bing — konten baru cepat masuk AI search.",
+    sub: "Submit tiap 2 jam + Bing Webmaster API. ChatGPT Search pakai index Bing — artikel baru cepat muncul di jawaban AI.",
     ok: true,
+    lastVerified: null,
   },
   {
     iconName: "trend-up" as const,
     title: "Kunjungan dari AI /7 hari",
-    big: aiRefs ? fmtInt(aiRefs.value) : "—",
-    sub: aiRefs ? "chatgpt.com, perplexity.ai, claude.ai, copilot, gemini (via GA4)" : "mulai terhitung setelah collector GA4 jalan",
-    ok: aiRefs ? Number(aiRefs.value) > 0 : false,
+    big: aiRefs ? fmtInt(aiRefsValue) : "—",
+    sub: aiRefs && aiRefsValue > 0
+      ? "chatgpt.com, perplexity.ai, claude.ai, copilot, gemini (via collector traffic_source)."
+      : "Belum ada data — butuh aktivitas user yang referrer dari AI. Bisa dipicu setelah ada visitor nyata dari AI.",
+    ok: aiRefsValue > 0,
+    lastVerified: null,
   },
 ];
+
+// Hitung jumlah cek per engine (rolling 30d).
+const cnt = (e: string) => citations.filter((c) => c.engine === e);
+const strikes = {
+  perplexity: { hit: cnt("perplexity").filter((c) => c.mentioned).length, total: cnt("perplexity").length },
+  chatgpt:    { hit: cnt("chatgpt").filter((c) => c.mentioned).length,    total: cnt("chatgpt").length },
+  gemini:     { hit: cnt("gemini").filter((c) => c.mentioned).length,     total: cnt("gemini").length },
+};
+
+// Cek apakah role user boleh submit cek baru (superadmin only — keyed interactively?)
+const canSubmit = user.role === "superadmin";
 ---
 <Base title="AI Search Visibility" tenantName={tenant.name}>
+  <!-- HERO -->
   <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); color: #fff;">
     <div class="hazard-stripe absolute inset-x-0 top-0"></div>
     <div class="pointer-events-none absolute right-6 top-6 hidden h-32 w-32 rounded-full sm:block" style="background: radial-gradient(circle, rgb(99 102 241 / 0.35), transparent 70%)"></div>
     <div class="relative z-10 max-w-xl">
       <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#A5B4FC]">AI Search Visibility</div>
       <h2 class="mt-2 text-display text-3xl sm:text-4xl">Toko Anda juga<br />ditemukan lewat <span style="color:#A5B4FC">ChatGPT, Perplexity, Gemini.</span></h2>
-      <p class="mt-2 text-sm text-white/70">{tenant.name} · infrastruktur AI-search 100% hijau.</p>
+      <p class="mt-2 text-sm text-white/70">{tenant.name} · infrastruktur AI-search hijau — tanpa API submit ke ChatGPT.</p>
     </div>
   </div>
 
+  <!-- ⭐ KARTU EDUKASI: Cara AI belajar tentang kita -->
+  <div class="card mt-4 overflow-hidden">
+    <div class="border-b border-[color:var(--border-subtle)] px-5 py-3" style="background: linear-gradient(135deg, rgb(99 102 241 / 0.08), transparent);">
+      <div class="flex items-center gap-2">
+        <span class="grid h-7 w-7 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600">
+          <Icon name="sparkles" size="sm" strokeWidth={1.75} />
+        </span>
+        <div>
+          <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-indigo-700">Cara AI belajar tentang kita</div>
+          <h3 class="font-[family-name:var(--font-heading)] text-base font-bold">3 jalur otomatis — tanpa API submit ke ChatGPT</h3>
+        </div>
+      </div>
+    </div>
+    <div class="grid gap-4 p-5 lg:grid-cols-3">
+      <!-- Jalur 1: Crawler -->
+      <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 p-4">
+        <div class="flex items-center gap-2">
+          <span class="grid h-9 w-9 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600">
+            <Icon name="user" size="sm" strokeWidth={1.75} />
+          </span>
+          <div class="font-[family-name:var(--font-heading)] text-sm font-bold">1. Crawler bot</div>
+        </div>
+        <p class="mt-2 text-xs leading-relaxed text-[color:var(--text-secondary)]">
+          Bot AI seperti <strong>GPTBot, ClaudeBot, OAI-SearchBot</strong> crawl langsung ke situs kita.
+          Yang datang sendiri, lihat halaman kita, training data mereka diperbarui.
+        </p>
+        <p class="mt-1 text-[10px] italic text-[color:var(--text-faint)]">
+          → Perlu: robots.txt izinkan mereka. Dicek tiap 12 jam.
+        </p>
+      </div>
+      <!-- Jalur 2: Bing index -->
+      <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 p-4">
+        <div class="flex items-center gap-2">
+          <span class="grid h-9 w-9 place-items-center rounded-lg bg-sky-500/10 text-sky-600">
+            <Icon name="search" size="sm" strokeWidth={1.75} />
+          </span>
+          <div class="font-[family-name:var(--font-heading)] text-sm font-bold">2. Bing Index</div>
+        </div>
+        <p class="mt-2 text-xs leading-relaxed text-[color:var(--text-secondary)]">
+          <strong>ChatGPT Search</strong> baca index Bing (bukan Google). Kita submit URL baru ke
+          <strong>IndexNow</strong> tiap 2 jam → Bing crawl → muncul di ChatGPT Search.
+        </p>
+        <p class="mt-1 text-[10px] italic text-[color:var(--text-faint)]">
+          → Perlu: URL di-IndexNow. Lebih cepat dari Google.
+        </p>
+      </div>
+      <!-- Jalur 3: llms.txt -->
+      <div class="rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 p-4">
+        <div class="flex items-center gap-2">
+          <span class="grid h-9 w-9 place-items-center rounded-lg bg-amber-500/10 text-amber-600">
+            <Icon name="doc" size="sm" strokeWidth={1.75} />
+          </span>
+          <div class="font-[family-name:var(--font-heading)] text-sm font-bold">3. llms.txt</div>
+        </div>
+        <p class="mt-2 text-xs leading-relaxed text-[color:var(--text-secondary)]">
+          <strong>llms.txt</strong> adalah "menu mesin-baca" untuk AI: produk, brand, area, FAQ diringkas.
+          Saat AI cari tahu tentang kita, file ini yang sering dibaca duluan.
+        </p>
+        <p class="mt-1 text-[10px] italic text-[color:var(--text-faint)]">
+          → Perlu: llms.txt tersedia & fresh. Tiap artikel baru → regenerate.
+        </p>
+      </div>
+    </div>
+    <div class="border-t border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/30 px-5 py-3 text-[11px] leading-relaxed text-[color:var(--text-muted)]">
+      <strong class="text-[color:var(--text-secondary)]">Fakta jujur:</strong> Tidak ada yang bisa "kirim website ke AI" tiap hari — ChatGPT/Perplexity/Claude tidak punya API submit.
+      Yang bisa kita lakukan: pastikan 3 jalur di atas hijau dan update konten konsisten.
+      Referensi resmi: <a href="https://llmstxt.org" target="_blank" rel="noopener" class="text-[color:var(--info)] hover:underline">llmstxt.org</a>.
+    </div>
+  </div>
+
+  <!-- 4 KARTU INFRASTRUKTUR -->
   <div class="mt-4 grid gap-3 sm:grid-cols-2">
     {items.map((it) => (
       <div class="card relative p-5">
@@ -111,6 +223,11 @@ const items = [
             </div>
             <div class:list={["mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold", it.ok ? "text-[color:var(--success)]" : "text-[color:var(--text-primary)]"]}>{it.big}</div>
             <p class="mt-1 text-xs text-[color:var(--text-muted)]">{it.sub}</p>
+            {it.lastVerified && (
+              <p class="mt-1 text-[10px] text-[color:var(--text-faint)]">
+                <Icon name="clock" size="xs" class="inline align-middle" /> terakhir dicek {ago(it.lastVerified)} (cron llm-search-ping)
+              </p>
+            )}
             {it.href && (
               <a class="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-[color:var(--info)] hover:underline" href={it.href} target="_blank" rel="noopener">
                 {it.hrefLabel}
@@ -123,57 +240,165 @@ const items = [
     ))}
   </div>
 
+  <!-- SITASI AI + CHECKLIST INTERAKTIF -->
   <div class="card mt-4 p-5">
     <div class="flex items-center gap-3">
       <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[color:var(--info-soft)] text-[color:var(--info)]">
-        <Icon name="sparkles" size="md" strokeWidth={1.75} />
+        <Icon name="mail" size="md" strokeWidth={1.75} />
       </div>
       <div class="flex-1">
-        <div class="font-[family-name:var(--font-heading)] text-sm font-bold">Sitasi di jawaban AI <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">apakah {tenant.name} disebut ChatGPT/Perplexity/Gemini</span></div>
+        <div class="font-[family-name:var(--font-heading)] text-sm font-bold">
+          Cek sitasi AI: apakah {tenant.name} disebut?
+        </div>
         <p class="mt-0.5 text-xs text-[color:var(--text-muted)]">
-          Pengecekan manual tiap awal bulan (5 query × 3 mesin).
-          {lastChecked
-            ? `Terakhir dicek ${formatTanggal(lastChecked.toString())}.`
-            : `Belum ada hasil cek.`}
+          Pengecekan manual tiap awal bulan. {citations.length} cek tercatat · terakhir {lastChecked ? formatTanggal(lastChecked.toString()) : "—"} · cek berikutnya {nextCheckStr}.
         </p>
       </div>
       <span class="chip text-[10px]">{citations.length} cek</span>
     </div>
+
     {citations.length === 0 ? (
-      <EmptyState
-        title="Belum ada hasil cek"
-        message={`5 query × 3 mesin AI (Perplexity, ChatGPT, Gemini) — apakah ${tenant.name} muncul saat orang tanya tentang toko bangunan Majenang/Cilacap.`}
-        mascot="peek"
-        when={`Cek berikutnya dijadwalkan ${nextCheckStr}.`}
-        action="Tidak perlu apa-apa — agen akan cek dan isi otomatis tiap awal bulan. Ingin cek sekarang? Minta lewat chat agency."
-      />
+      <div class="mt-3">
+        <EmptyState
+          title="Belum ada hasil cek"
+          message={`5 query × 3 engine (Perplexity, ChatGPT, Gemini) — apakah ${tenant.name} muncul saat orang tanya "toko bangunan Majenang".`}
+          mascot="peek"
+          when={`Cek berikutnya: ${nextCheckStr} (awal bulan).`}
+          action="Bisa cek sendiri sekarang via panel bawah (kalau ada akses API key), atau minta agency lewat chat."
+        />
+      </div>
     ) : (
       <div class="mt-3">
         <div class="grid grid-cols-3 gap-2">
-          {["perplexity", "chatgpt", "gemini"].map((e) => {
-            const rows = citations.filter((c) => c.engine === e);
-            const hit = rows.filter((c) => c.mentioned).length;
+          {(["perplexity", "chatgpt", "gemini"] as const).map((e) => {
+            const s = strikes[e];
+            const pct = s.total ? Math.round((s.hit / s.total) * 100) : 0;
+            const tone = s.total === 0 ? "" : s.hit === s.total ? "text-[color:var(--success)]" : s.hit > 0 ? "text-[color:var(--warning)]" : "text-[color:var(--text-faint)]";
             return (
               <div class="rounded-lg bg-[color:var(--bg-surface-2)]/60 p-3 text-center">
                 <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">{e}</div>
-                <div class={`mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold ${rows.length && hit === rows.length ? "text-[color:var(--success)]" : hit > 0 ? "text-[color:var(--warning)]" : ""}`}>{rows.length ? `${hit}/${rows.length}` : "—"}</div>
-                <div class="text-[10px] text-[color:var(--text-muted)]">disebut</div>
+                <div class={`mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold ${tone}`}>{s.total ? `${s.hit}/${s.total}` : "—"}</div>
+                <div class="mt-0.5 text-[10px] text-[color:var(--text-muted)]">{s.total ? `${pct}% disebut` : "belum dicek"}</div>
               </div>
             );
           })}
         </div>
-        <table class="mt-3 w-full text-sm">
-          <tbody>
-            {citations.slice(0, 10).map((c) => (
-              <tr class="border-t border-[color:var(--border-subtle)]">
-                <td class="py-2 pr-2">{c.query}</td>
-                <td class="py-2 text-[11px] text-[color:var(--text-faint)]">{c.engine}</td>
-                <td class="py-2 text-right">{c.mentioned ? <span class="chip chip-success text-[10px]">disebut{c.position ? ` #${c.position}` : ""}</span> : <span class="chip text-[10px]">tidak</span>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {citations.length > 0 && (
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+                  <th class="px-3 py-2">Query</th>
+                  <th class="px-2 py-2">Engine</th>
+                  <th class="px-2 py-2">Dicek</th>
+                  <th class="px-3 py-2 text-right">Hasil</th>
+                </tr>
+              </thead>
+              <tbody>
+                {citations.slice(0, 12).map((c) => (
+                  <tr class="border-t border-[color:var(--border-subtle)]">
+                    <td class="px-3 py-2 font-medium">{c.query}</td>
+                    <td class="px-2 py-2 text-[11px] text-[color:var(--text-faint)] capitalize">{c.engine}</td>
+                    <td class="px-2 py-2 text-[11px] text-[color:var(--text-faint)]">{formatTanggal(c.checkedAt.toString())}</td>
+                    <td class="px-3 py-2 text-right">
+                      {c.mentioned ? (
+                        <span class="chip chip-success text-[10px]">disebut{c.position ? ` #${c.position}` : ""}</span>
+                      ) : (
+                        <span class="chip text-[10px]">tidak</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     )}
+
+    {canSubmit && citations.length === 0 && (
+      <details class="mt-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/40 p-3 text-xs">
+        <summary class="cursor-pointer font-semibold text-[color:var(--text-secondary)]">Cara cek manual (kalau ada API key)</summary>
+        <ol class="mt-2 ml-5 list-decimal space-y-1 text-[color:var(--text-secondary)]">
+          <li>Buka Perplexity/ChatGPT/Gemini (web), tanya: "toko bangunan Majenang terbaik".</li>
+          <li>Cek apakah nama toko muncul di jawaban. Ranking = posisi (1 = paling atas).</li>
+          <li>POST ke admin: <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono text-[10px]">/api/cron/ai-citations?token=ADMIN_CRON_TOKEN</code> body JSON <code class="rounded bg-[color:var(--bg-surface)] px-1 font-mono text-[10px]">{`{engine, query, mentioned, position}`}</code></li>
+          <li>Hasil otomatis masuk ke dashboard ini. Admin endpoint ingest ke sgb-dashboard via X-Ingest-Key.</li>
+        </ol>
+        <p class="mt-2 text-[10px] italic text-[color:var(--text-faint)]">
+          Alternatif otomatis penuh: pakai <strong>GMI API key</strong> (MiniMax) atau external assistant API. Belum diaktifkan — tim perlu cek biaya API per engine dulu.
+        </p>
+      </details>
+    )}
+  </div>
+
+  <!-- CRON KONTEKS (transparansi) -->
+  <div class="card mt-4 p-5">
+    <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Cron terkait AI · transparansi penuh</div>
+    <p class="mt-1 text-xs text-[color:var(--text-muted)]">
+      Tiap cron di-host admin.sariglassbangunan.com, dijadwalkan via Hostinger cron manager.
+      Dashboard ini ping admin tiap halaman dibuka untuk lihat status terakhir.
+    </p>
+    <table class="mt-3 w-full text-sm">
+      <thead>
+        <tr class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+          <th class="px-3 py-2">Cron</th>
+          <th class="px-2 py-2">Jadwal</th>
+          <th class="px-2 py-2">Peran</th>
+          <th class="px-3 py-2 text-right">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {AI_CRON_SCHEDULE.map((c) => {
+          const live = c.name === "llm-search-ping" ? lastLlmCron : c.name === "ai-citations" ? cronSummary?.citations : null;
+          const isOk = live?.ok ?? null;
+          return (
+            <tr class="border-t border-[color:var(--border-subtle)]">
+              <td class="px-3 py-2 font-mono text-xs">{c.name}</td>
+              <td class="px-2 py-2 text-[11px] text-[color:var(--text-faint)]">{c.schedule}</td>
+              <td class="px-2 py-2 text-xs text-[color:var(--text-secondary)]">{c.role}</td>
+              <td class="px-3 py-2 text-right">
+                {isOk === null ? (
+                  <span class="chip text-[10px]">—</span>
+                ) : isOk ? (
+                  <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                    <Icon name="check" size="xs" /> ok
+                  </span>
+                ) : (
+                  <span class="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                    <Icon name="x" size="xs" /> err
+                  </span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- NILAI AI SEARCH (kartu konteks, hard-honest) -->
+  <div class="card mt-4 p-5" style="background: linear-gradient(135deg, rgb(99 102 241 / 0.05), transparent);">
+    <div class="flex items-start gap-3">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600">
+        <Icon name="trend-up" size="md" strokeWidth={1.75} />
+      </span>
+      <div class="flex-1">
+        <div class="font-[family-name:var(--font-heading)] text-sm font-bold">Berapa nilai AI search untuk toko bangunan?</div>
+        <p class="mt-1 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+          Berbeda dengan Google search yang kebanyakan click → website, AI search kebanyakan jadi rekomendasi langsung.
+          <strong>1× disebut di jawaban ChatGPT = ratusan user potensial tanpa bayar iklan</strong>.
+          Tradeoff: butuh konten konsisten (artikel baru tiap minggu), bukan cuma sekali submit.
+        </p>
+        <p class="mt-2 text-xs text-[color:var(--text-muted)]">
+          Estimate kasar: kalau AI search menghasilkan 1 customer/bulan dari 100 disebut, dengan margin Rp150rb/deal,
+          itu setara Rp150 rb/bulan passive income — dari artikel yang ditulis sekali dan dirangkum llms.txt tiap artikel baru.
+        </p>
+      </div>
+    </div>
   </div>
 </Base>
+
+<style>
+  /* Local helper styles — none yet */
+</style>
