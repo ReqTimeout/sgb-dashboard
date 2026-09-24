@@ -3,14 +3,38 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestRanks, rankHistory } from "../lib/data";
 import { fmtInt, insightPosition } from "../lib/insights";
+import { getDb } from "../lib/db";
+import { keywordInventory, articlesView } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 
+const db = getDb();
+// Relasi keyword target → artikel: hanya yang SUDAH PUBLISH yang masuk ranking.
+// published = status inventory terbit/ter-commit/diajukan ATAU artikel berstatus published.
+const PUBLISHED_INV = new Set(["terbit", "ter-commit", "diajukan"]);
+const invRows = await db
+  .select({ keyword: keywordInventory.keyword, status: keywordInventory.status, articleSlug: keywordInventory.articleSlug })
+  .from(keywordInventory)
+  .where(eq(keywordInventory.tenantId, tenant.id));
+const invByKw = new Map(invRows.map((r) => [r.keyword, r]));
+const artRows = await db
+  .select({ slug: articlesView.slug, title: articlesView.title, status: articlesView.status })
+  .from(articlesView)
+  .where(eq(articlesView.tenantId, tenant.id));
+const artBySlug = new Map(artRows.map((a) => [a.slug, a]));
+const publishedCount = invRows.filter((r) => PUBLISHED_INV.has(r.status)).length;
+
 const ranks = (await latestRanks(tenant.id, 50)).filter((r) => !r.keyword.startsWith("page:")).slice(0, 20);
-const movers: { keyword: string; now: number | null; prev: number | null; move: number | null; clicks: number | null }[] = [];
+const movers: { keyword: string; now: number | null; prev: number | null; move: number | null; clicks: number | null; slug: string | null; articleTitle: string | null }[] = [];
 for (const r of ranks) {
+  const inv = invByKw.get(r.keyword);
+  const slug = inv?.articleSlug ?? null;
+  const art = slug ? artBySlug.get(slug) : undefined;
+  const isPublished = (inv != null && PUBLISHED_INV.has(inv.status)) || art?.status === "published";
+  if (!isPublished) continue; // belum publish → tidak masuk ranking
   const hist = await rankHistory(tenant.id, r.keyword, 10);
   const prev = hist.length > 1 ? hist[0].value : null;
   movers.push({
@@ -19,6 +43,8 @@ for (const r of ranks) {
     prev,
     move: r.position != null && prev != null ? prev - r.position : null,
     clicks: r.clicks,
+    slug,
+    articleTitle: art?.title ?? null,
   });
 }
 movers.sort((a, b) => (b.move ?? -999) - (a.move ?? -999));
@@ -43,7 +69,8 @@ function badge(pos: number | null): string {
         {insightPosition(avg)}
       </div>
       <p class="mt-2 max-w-xl text-sm text-white/80">
-        {up7 > 0 ? `${up7} keyword naik minggu ini, ${movers.filter((m) => (m.move ?? 0) < 0).length} turun.` : "Belum ada pergerakan signifikan minggu ini."}
+        Hanya keyword yang artikelnya <strong>sudah publish</strong> ({publishedCount} kandidat) yang masuk sini.
+        {up7 > 0 ? ` ${up7} keyword naik minggu ini, ${movers.filter((m) => (m.move ?? 0) < 0).length} turun.` : " Belum ada pergerakan signifikan minggu ini."}
         {" "}{top3 > 0 ? `${top3} di TOP 3 (gold tier).` : ""}
       </p>
     </div>
@@ -60,7 +87,7 @@ function badge(pos: number | null): string {
     <table class="w-full min-w-[640px] text-sm">
       <thead>
         <tr class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
-          <th class="px-5 py-3">Keyword</th>
+          <th class="px-5 py-3">Keyword → Artikel</th>
           <th class="px-2 py-3 text-right">Pos</th>
           <th class="px-2 py-3 text-right">Δ 7 hari</th>
           <th class="px-2 py-3 text-right">Klik</th>
@@ -68,12 +95,21 @@ function badge(pos: number | null): string {
         </tr>
       </thead>
       <tbody>
-        {movers.length === 0 && (
-          <tr><td colspan="5" class="px-4 py-10 text-center text-[color:var(--text-faint)]">Belum ada data — push GSC pertama jalan 05:00 WIB.</td></tr>
-        )}
-        {movers.map((m) => (
-          <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
-            <td class="px-5 py-3 font-medium">{m.keyword}</td>
+      {movers.length === 0 && (
+        <tr><td colspan="5" class="px-4 py-10 text-center text-[color:var(--text-faint)]">Belum ada keyword publish yang ter-track — publish artikel dulu di /keywords (strip "Next up"), ranking muncul setelah GSC push 05:00 WIB.</td></tr>
+      )}
+      {movers.map((m) => (
+        <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+          <td class="px-5 py-3">
+            <div class="font-medium">{m.keyword}</div>
+            {m.slug ? (
+              <a href={`https://sariglassbangunan.com/blog/${m.slug}/`} target="_blank" rel="noopener" class="mt-0.5 block max-w-[280px] truncate text-[11px] text-[color:var(--info)] hover:underline" title={m.articleTitle ?? m.slug}>
+                {m.articleTitle ?? m.slug} ↗
+              </a>
+            ) : (
+              <div class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">artikel publish (slug menyusul)</div>
+            )}
+          </td>
             <td class="px-2 py-3 text-right">
               <span class:list={["font-[family-name:var(--font-mono-num)] text-lg font-extrabold", m.now != null && m.now <= 3 ? "text-[color:var(--brand)]" : ""]}>{m.now ?? "—"}</span>
             </td>

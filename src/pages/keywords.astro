@@ -4,7 +4,7 @@ import EmptyState from "../components/EmptyState.astro";
 import Icon from "../components/Icon.astro";
 import InfoHint from "../components/InfoHint.astro";
 import { getRequestTenant } from "../lib/data";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import { keywordInventory } from "../../drizzle/schema";
 import { fmtInt, formatTanggal } from "../lib/insights";
@@ -15,7 +15,14 @@ const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 
 const PAGE_SIZE = 50;
-const ALL_STATUSES = ["antre", "draft", "terbit", "ter-commit", "diajukan"];
+// Status tampil (Bos) → status DB. Rantai: Pending → Artikel dibuat → On progress publish → Publish.
+const STATUS_GROUPS: Record<string, string[]> = {
+  pending: ["antre"],
+  "artikel-dibuat": ["draft"],
+  "on-progress": ["terbit"],
+  publish: ["ter-commit", "diajukan"],
+};
+const ALL_STATUSES = Object.keys(STATUS_GROUPS);
 const CLUSTER_LABELS: Record<string, string> = Object.fromEntries(CLUSTERS.map((c) => [c.id, c.label]));
 
 // Query params
@@ -29,7 +36,7 @@ const q = (Astro.url.searchParams.get("q") ?? "").trim();
 // Build Drizzle WHERE conditions
 const where = [eq(keywordInventory.tenantId, tenant.id)];
 if (statusParam && (ALL_STATUSES as string[]).includes(statusParam)) {
-  where.push(eq(keywordInventory.status, statusParam) as any);
+  where.push(inArray(keywordInventory.status, STATUS_GROUPS[statusParam]));
 }
 if (clusterParam && CLUSTERS.find((c) => c.id === clusterParam)) {
   where.push(eq(keywordInventory.cluster, clusterParam) as any);
@@ -49,31 +56,56 @@ const countResult = await db
   .where(and(...where));
 const total = Number(countResult[0]?.total ?? 0);
 
-// Counts per status (cheap conditional sums, drizzle raw SQL via sql`)
+// Counts per status → agregat ke 4 grup tampil
 const statusCountResult = await db
   .select({
     status: keywordInventory.status,
     n: sql<number>`COUNT(*)`,
   })
   .from(keywordInventory)
-  .where(and(...where))
+  .where(eq(keywordInventory.tenantId, tenant.id))
   .groupBy(keywordInventory.status);
-const counts: Record<string, number> = Object.fromEntries(
+const dbCounts: Record<string, number> = Object.fromEntries(
   statusCountResult.map((r) => [r.status, Number(r.n ?? 0)]),
 );
-for (const s of ALL_STATUSES) if (!(s in counts)) counts[s] = 0;
+const counts: Record<string, number> = {};
+for (const g of ALL_STATUSES) counts[g] = STATUS_GROUPS[g].reduce((a, s) => a + (dbCounts[s] ?? 0), 0);
 
-// Sort whitelist — pakai desc dari drizzle untuk setiap key.
-type SortKey = "opportunity" | "priority" | "updated" | "keyword";
-import { desc } from "drizzle-orm";
+// Sort whitelist. Default "lokal" = local-first (Majenang, lalu Cilacap Raya),
+// baru opportunity DESC — strategi winning lokal dulu.
+type SortKey = "lokal" | "opportunity" | "priority" | "updated" | "keyword";
+const LOCAL_ORDER = sql`CASE WHEN ${keywordInventory.city} = 'Majenang' THEN 0 WHEN ${keywordInventory.city} LIKE '%Cilacap%' THEN 1 ELSE 2 END`;
 const SORT_MAP = {
+  lokal: LOCAL_ORDER,
   opportunity: desc(keywordInventory.opportunity),
   priority: desc(keywordInventory.priority),
   updated: desc(keywordInventory.updatedAt),
   keyword: desc(keywordInventory.keyword),
 } as const;
-const sortKey = (Object.keys(SORT_MAP).includes(sortParam) ? sortParam : "opportunity") as SortKey;
-const sortBy = SORT_MAP[sortKey];
+const sortKey = (Object.keys(SORT_MAP).includes(sortParam) ? sortParam : "lokal") as SortKey;
+const orderByExpr = sortKey === "lokal"
+  ? [LOCAL_ORDER, desc(keywordInventory.opportunity)]
+  : [SORT_MAP[sortKey]];
+
+// Next up: 3 keyword Pending lokal teratas (opportunity DESC) —
+// inilah yang NEXT dibuatkan artikel. Bos + tim lihat strip ini tiap pagi.
+const nextUp = await db
+  .select({
+    keyword: keywordInventory.keyword,
+    city: keywordInventory.city,
+    opportunity: keywordInventory.opportunity,
+    suggestion: keywordInventory.suggestion,
+  })
+  .from(keywordInventory)
+  .where(
+    and(
+      eq(keywordInventory.tenantId, tenant.id),
+      eq(keywordInventory.status, "antre"),
+      or(eq(keywordInventory.city, "Majenang"), like(keywordInventory.city, "%Cilacap%")),
+    ),
+  )
+  .orderBy(desc(keywordInventory.opportunity))
+  .limit(3);
 
 // Paginated query + filter q di memory (1 halaman max 50 baris — OK)
 const offset = (pageParam - 1) * PAGE_SIZE;
@@ -81,7 +113,7 @@ const rows = await db
   .select()
   .from(keywordInventory)
   .where(and(...where))
-  .orderBy(sortBy)
+  .orderBy(...orderByExpr)
   .limit(PAGE_SIZE)
   .offset(offset);
 const list = q
@@ -117,23 +149,26 @@ const linkBase = (overrides: Record<string, string | null>): string => {
 };
 
 const chipCls: Record<string, string> = {
-  antre: "chip",
-  draft: "chip chip-warning",
-  terbit: "chip chip-info",
-  "ter-commit": "chip",
-  diajukan: "chip chip-success",
+  pending: "chip",
+  "artikel-dibuat": "chip chip-warning",
+  "on-progress": "chip chip-info",
+  publish: "chip chip-success",
 };
+// DB status → grup tampil (untuk baris tabel)
+function groupOf(dbStatus: string): string {
+  for (const g of ALL_STATUSES) if (STATUS_GROUPS[g].includes(dbStatus)) return g;
+  return "pending";
+}
 const STATUS_LABEL: Record<string, string> = {
-  antre: "Antre",
-  draft: "Draft",
-  terbit: "Terbit",
-  "ter-commit": "Ter-commit",
-  diajukan: "Diajukan",
+  pending: "Pending",
+  "artikel-dibuat": "Artikel dibuat",
+  "on-progress": "On progress publish",
+  publish: "Publish",
 };
 ---
 <Base title="Keyword Inventory" tenantName={tenant.name}>
   <p class="mt-1 text-sm text-[color:var(--text-muted)]">
-    {tenant.name} · {fmtInt(total)} keyword terlacak — peluang tertinggi di atas.
+    {tenant.name} · {fmtInt(total)} keyword terlacak — lokal (Majenang/Cilacap) dulu di atas.
     {lastEnrich && (
       <span class="ml-2">Enrichment terakhir: {formatTanggal(lastEnrich.toString(), true)}.</span>
     )}
@@ -150,7 +185,7 @@ const STATUS_LABEL: Record<string, string> = {
         </a>
       ))}
       <span class="ml-auto">
-        <InfoHint source={`Sort default: opportunity DESC = prioritas tertinggi (skor peluang × GSC pos4-10). Lainnya: priority / updated / keyword.`} variant="info" />
+        <InfoHint source={`Sort default: Lokal dulu (Majenang → Cilacap Raya → lainnya), lalu opportunity DESC. Strategi winning lokal dulu.`} variant="info" />
       </span>
     </div>
 
@@ -172,6 +207,7 @@ const STATUS_LABEL: Record<string, string> = {
       {sortParam && <input type="hidden" name="sort" value={sortParam} />}
       <input type="search" name="q" value={q} placeholder="Cari keyword / kota…" class="rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-3 py-1 text-sm flex-1 min-w-[180px]" />
       <select name="sort" class="rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-3 py-1 text-sm">
+        <option value="lokal" selected={sortParam === "lokal"}>Sort: Lokal dulu</option>
         <option value="opportunity" selected={sortParam === "opportunity"}>Sort: Peluang</option>
         <option value="priority" selected={sortParam === "priority"}>Sort: Prioritas</option>
         <option value="updated" selected={sortParam === "updated"}>Sort: Terbaru di-update</option>
@@ -187,6 +223,26 @@ const STATUS_LABEL: Record<string, string> = {
       ))}
     </div>
   </div>
+
+  <!-- NEXT UP — 3 keyword Pending lokal teratas = yang NEXT dibuatkan artikel -->
+  {nextUp.length > 0 && (
+    <div class="mt-4 rounded-2xl border border-[color:var(--brand)]/30 bg-[color:var(--brand-soft)]/40 p-4">
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--brand)]">Next up — dibuatkan artikel</span>
+        <InfoHint source="Top 3 status Pending di Majenang/Cilacap Raya, opportunity tertinggi. Inilah antrian artikel berikutnya." variant="info" />
+      </div>
+      <ol class="mt-2 space-y-1.5">
+        {nextUp.map((n, i) => (
+          <li class="flex items-center gap-2 text-sm">
+            <span class="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[color:var(--brand)] text-[10px] font-bold text-white">{i + 1}</span>
+            <span class="min-w-0 flex-1 truncate font-medium">{n.keyword}</span>
+            <span class="shrink-0 text-[11px] text-[color:var(--text-muted)]">{n.city ?? "—"}</span>
+            <span class="shrink-0 font-[family-name:var(--font-mono-num)] text-[11px] font-bold">peluang {fmtInt(n.opportunity)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )}
 
   <!-- BULK ACTION FORM -->
   {isSuperadmin && list.length > 0 && (
@@ -247,7 +303,7 @@ const STATUS_LABEL: Record<string, string> = {
                       <div class="mt-0.5 truncate text-[10px] text-[color:var(--text-faint)]">= {r.normalizedKeyword}</div>
                     )}
                   </td>
-                  <td class="px-2 py-2"><span class:list={[chipCls[r.status] ?? "chip", "text-[10px]"]}>{STATUS_LABEL[r.status] ?? r.status}</span></td>
+                  <td class="px-2 py-2"><span class:list={[chipCls[groupOf(r.status)] ?? "chip", "text-[10px]"]} title={`db: ${r.status}`}>{STATUS_LABEL[groupOf(r.status)]}</span></td>
                   <td class="px-2 py-2 text-xs">
                     {r.cluster ? <span class="chip chip-info text-[10px]">{CLUSTER_LABELS[r.cluster] ?? r.cluster}</span> : <span class="text-[color:var(--text-faint)]">—</span>}
                   </td>
@@ -300,7 +356,7 @@ const STATUS_LABEL: Record<string, string> = {
               {list.map((r) => (
                 <tr class="border-t border-[color:var(--border-subtle)]">
                   <td class="px-3 py-2 font-medium">{r.keyword}</td>
-                  <td class="px-2 py-2"><span class:list={[chipCls[r.status] ?? "chip", "text-[10px]"]}>{STATUS_LABEL[r.status] ?? r.status}</span></td>
+                  <td class="px-2 py-2"><span class:list={[chipCls[groupOf(r.status)] ?? "chip", "text-[10px]"]} title={`db: ${r.status}`}>{STATUS_LABEL[groupOf(r.status)]}</span></td>
                   <td class="px-2 py-2 text-xs">{r.cluster ? <span class="chip chip-info text-[10px]">{CLUSTER_LABELS[r.cluster] ?? r.cluster}</span> : "—"}</td>
                   <td class="px-2 py-2 text-xs text-[color:var(--text-muted)]">{r.city ?? "—"}</td>
                   <td class="px-2 py-2 text-xs text-[color:var(--text-secondary)]">{r.suggestion ?? "—"}</td>
@@ -336,8 +392,8 @@ const STATUS_LABEL: Record<string, string> = {
   )}
 
   <p class="mt-3 text-[10px] text-[color:var(--text-faint)]">
-    Rantai status: antre → draft → terbit → ter-commit → diajukan (submit Google).
-    Snapshot enrichment sync tiap pagi via <code>/api/cron/migrate-keywords</code>.
+    Rantai status: Pending (antre) → Artikel dibuat (draft) → On progress publish (terbit) → Publish (ter-commit + diajukan ke Google).
+    Urutan default: lokal dulu (Majenang → Cilacap Raya). Snapshot enrichment sync tiap pagi via <code>/api/cron/migrate-keywords</code>.
   </p>
 </Base>
 
