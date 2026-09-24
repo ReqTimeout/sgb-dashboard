@@ -128,6 +128,27 @@ const list = q
 const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 const isSuperadmin = user.role === "superadmin";
 
+// Live index-stage dari admin per articleSlug (dibuat → menunggu-publish →
+// menunggu-terindex → terindex). Pola sama seperti health.astro (fetch server-side).
+let indexStage: Record<string, { stage: string }> = {};
+try {
+  const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
+  const adminToken = process.env.ADMIN_CRON_TOKEN ?? "";
+  const slugs = [...new Set(list.map((r) => r.articleSlug).filter(Boolean))] as string[];
+  if (adminToken && slugs.length > 0) {
+    const r = await fetch(`${adminUrl}/api/seo/keyword-status?token=${encodeURIComponent(adminToken)}&slugs=${encodeURIComponent(slugs.join(","))}`, { signal: AbortSignal.timeout(15000) });
+    if (r.ok) {
+      const j = await r.json();
+      indexStage = j.states ?? {};
+    }
+  }
+} catch { /* admin down — badge index disembunyikan */ }
+const INDEX_BADGE: Record<string, { label: string; cls: string }> = {
+  "menunggu-publish": { label: "Menunggu publish", cls: "chip chip-warning" },
+  "menunggu-terindex": { label: "Menunggu terindex", cls: "chip chip-info" },
+  "terindex": { label: "Terindex", cls: "chip chip-success" },
+};
+
 // ETA sederhana: kecepatan = rata-rata publish per minggu (from articlesView).
 // Kita pakai proxy: terbit total ÷ jumlah minggu aktif. Untuk sekarang, hardcode ETA dari total antre.
 const lastEnrich = rows.find((r) => r.opportunityUpdatedAt)?.opportunityUpdatedAt ?? null;
@@ -303,7 +324,7 @@ const STATUS_LABEL: Record<string, string> = {
                       <div class="mt-0.5 truncate text-[10px] text-[color:var(--text-faint)]">= {r.normalizedKeyword}</div>
                     )}
                   </td>
-                  <td class="px-2 py-2"><span class:list={[chipCls[groupOf(r.status)] ?? "chip", "text-[10px]"]} title={`db: ${r.status}`}>{STATUS_LABEL[groupOf(r.status)]}</span></td>
+                  <td class="px-2 py-2"><span class:list={[chipCls[groupOf(r.status)] ?? "chip", "text-[10px]"]} title={`db: ${r.status}`}>{STATUS_LABEL[groupOf(r.status)]}</span>{r.articleSlug && indexStage[r.articleSlug] && INDEX_BADGE[indexStage[r.articleSlug].stage] && (<span class:list={[INDEX_BADGE[indexStage[r.articleSlug].stage].cls, "ml-1 text-[10px]"]} title={`index: ${indexStage[r.articleSlug].stage}`}>{INDEX_BADGE[indexStage[r.articleSlug].stage].label}</span>)}</td>
                   <td class="px-2 py-2 text-xs">
                     {r.cluster ? <span class="chip chip-info text-[10px]">{CLUSTER_LABELS[r.cluster] ?? r.cluster}</span> : <span class="text-[color:var(--text-faint)]">—</span>}
                   </td>
@@ -356,7 +377,7 @@ const STATUS_LABEL: Record<string, string> = {
               {list.map((r) => (
                 <tr class="border-t border-[color:var(--border-subtle)]">
                   <td class="px-3 py-2 font-medium">{r.keyword}</td>
-                  <td class="px-2 py-2"><span class:list={[chipCls[groupOf(r.status)] ?? "chip", "text-[10px]"]} title={`db: ${r.status}`}>{STATUS_LABEL[groupOf(r.status)]}</span></td>
+                  <td class="px-2 py-2"><span class:list={[chipCls[groupOf(r.status)] ?? "chip", "text-[10px]"]} title={`db: ${r.status}`}>{STATUS_LABEL[groupOf(r.status)]}</span>{r.articleSlug && indexStage[r.articleSlug] && INDEX_BADGE[indexStage[r.articleSlug].stage] && (<span class:list={[INDEX_BADGE[indexStage[r.articleSlug].stage].cls, "ml-1 text-[10px]"]} title={`index: ${indexStage[r.articleSlug].stage}`}>{INDEX_BADGE[indexStage[r.articleSlug].stage].label}</span>)}</td>
                   <td class="px-2 py-2 text-xs">{r.cluster ? <span class="chip chip-info text-[10px]">{CLUSTER_LABELS[r.cluster] ?? r.cluster}</span> : "—"}</td>
                   <td class="px-2 py-2 text-xs text-[color:var(--text-muted)]">{r.city ?? "—"}</td>
                   <td class="px-2 py-2 text-xs text-[color:var(--text-secondary)]">{r.suggestion ?? "—"}</td>
