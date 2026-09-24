@@ -1,4 +1,4 @@
-// /api/keywords/link-articles — terima peta keyword→artikel dari admin.
+// /api/ingest/link-articles — terima peta keyword→artikel dari admin.
 // Dipanggil push-metrics admin (server-to-server, X-Ingest-Key sama dgn ingest).
 // UPDATE-ONLY: hanya baris inventory yang cocok (exact / normalized) yang
 // diisi article_slug. TIDAK pernah insert (cegah duplikat), TIDAK ubah status
