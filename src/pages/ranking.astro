@@ -19,7 +19,9 @@ const invRows = await db
   .select({ keyword: keywordInventory.keyword, status: keywordInventory.status, articleSlug: keywordInventory.articleSlug })
   .from(keywordInventory)
   .where(eq(keywordInventory.tenantId, tenant.id));
+const normKw = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
 const invByKw = new Map(invRows.map((r) => [r.keyword, r]));
+const invByNorm = new Map(invRows.map((r) => [normKw(r.keyword), r]));
 const artRows = await db
   .select({ slug: articlesView.slug, title: articlesView.title, status: articlesView.status })
   .from(articlesView)
@@ -27,11 +29,19 @@ const artRows = await db
 const artBySlug = new Map(artRows.map((a) => [a.slug, a]));
 const publishedCount = invRows.filter((r) => PUBLISHED_INV.has(r.status)).length;
 
+// Slug dari ranking pageUrl (/blog/{slug}/) — fallback bila keyword tak ada di inventory.
+function slugFromUrl(url: string | null): string | null {
+  if (!url) return null;
+  const m = url.match(/\/blog\/([a-z0-9-]+)\/?/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
 const ranks = (await latestRanks(tenant.id, 50)).filter((r) => !r.keyword.startsWith("page:")).slice(0, 20);
 const movers: { keyword: string; now: number | null; prev: number | null; move: number | null; clicks: number | null; slug: string | null; articleTitle: string | null }[] = [];
 for (const r of ranks) {
-  const inv = invByKw.get(r.keyword);
-  const slug = inv?.articleSlug ?? null;
+  const inv = invByKw.get(r.keyword) ?? invByNorm.get(normKw(r.keyword));
+  let slug = inv?.articleSlug ?? null;
+  if (!slug) slug = slugFromUrl(r.pageUrl);
   const art = slug ? artBySlug.get(slug) : undefined;
   const isPublished = (inv != null && PUBLISHED_INV.has(inv.status)) || art?.status === "published";
   if (!isPublished) continue; // belum publish → tidak masuk ranking
@@ -48,7 +58,9 @@ for (const r of ranks) {
   });
 }
 movers.sort((a, b) => (b.move ?? -999) - (a.move ?? -999));
-const avg = ranks.length ? ranks.reduce((a, r) => a + (r.position ?? 0), 0) / ranks.filter((r) => r.position != null).length : null;
+// Semua statistik dari movers (yang sudah publish saja) — konsisten dengan tabel.
+const withPos = movers.filter((m) => m.now != null);
+const avg = withPos.length ? withPos.reduce((a, r) => a + (r.now ?? 0), 0) / withPos.length : null;
 const top3 = movers.filter((m) => m.now != null && m.now <= 3).length;
 const top10 = movers.filter((m) => m.now != null && m.now <= 10).length;
 const up7 = movers.filter((m) => (m.move ?? 0) > 0).length;

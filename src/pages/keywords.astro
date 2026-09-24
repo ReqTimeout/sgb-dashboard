@@ -29,7 +29,7 @@ const CLUSTER_LABELS: Record<string, string> = Object.fromEntries(CLUSTERS.map((
 const statusParam = Astro.url.searchParams.get("status") ?? "";
 const clusterParam = Astro.url.searchParams.get("cluster") ?? "";
 const cityParam = Astro.url.searchParams.get("city") ?? "";
-const sortParam = Astro.url.searchParams.get("sort") ?? "opportunity"; // default sort peluang desc
+const sortParam = Astro.url.searchParams.get("sort") ?? "lokal"; // default: lokal dulu (Majenang → Cilacap Raya)
 const pageParam = Math.max(1, parseInt(Astro.url.searchParams.get("page") ?? "1", 10) || 1);
 const q = (Astro.url.searchParams.get("q") ?? "").trim();
 
