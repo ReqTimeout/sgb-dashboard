@@ -7,7 +7,7 @@ import type { APIRoute } from "astro";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "../../../lib/db";
-import { keywordInventory, tenants } from "../../../../drizzle/schema";
+import { tenants } from "../../../../drizzle/schema";
 import { createHash } from "node:crypto";
 
 const Link = z.object({
@@ -48,7 +48,7 @@ export const POST: APIRoute = async ({ request }) => {
         SELECT id FROM keyword_inventory WHERE tenant_id = ${tenantId}
           AND article_slug <=> ${l.article_slug}
           AND (keyword = ${l.keyword} OR normalized_keyword = ${norm}) LIMIT 1`);
-      if ((sameRows as unknown[]).length > 0) { linked++; continue; }
+      if ((sameRows as unknown as any[]).length > 0) { linked++; continue; }
       if (parsed.data.insert_missing) {
         await db.execute(sql`
           INSERT INTO keyword_inventory (tenant_id, keyword, status, article_slug, priority, source, city, intent, normalized_keyword)
