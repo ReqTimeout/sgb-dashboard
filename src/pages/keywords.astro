@@ -136,7 +136,7 @@ try {
   const adminToken = process.env.ADMIN_CRON_TOKEN ?? "";
   const slugs = [...new Set(list.map((r) => r.articleSlug).filter(Boolean))] as string[];
   if (adminToken && slugs.length > 0) {
-    const r = await fetch(`${adminUrl}/api/seo/keyword-status?token=${encodeURIComponent(adminToken)}&slugs=${encodeURIComponent(slugs.join(","))}`, { signal: AbortSignal.timeout(15000) });
+    const r = await fetch(`${adminUrl}/api/cron/keyword-status?token=${encodeURIComponent(adminToken)}&slugs=${encodeURIComponent(slugs.join(","))}`, { signal: AbortSignal.timeout(15000) });
     if (r.ok) {
       const j = await r.json();
       indexStage = j.states ?? {};
