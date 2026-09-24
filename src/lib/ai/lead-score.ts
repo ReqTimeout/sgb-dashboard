@@ -8,7 +8,7 @@ export interface ScoredLead {
   reasons: string[];
 }
 
-// Estimasi nilai deal dari URL halaman (harga tipikal material Sari Glass)
+// Estimasi nilai deal dari URL halaman (harga tipikal material Sari Glass Bangunan)
 const VALUE_MAP: [RegExp, number, string][] = [
   [/granit|keramik|marmer/i, 2_000_000, "granit/keramik"],
   [/pintu|kusen|jendela/i, 2_500_000, "pintu/kusen"],

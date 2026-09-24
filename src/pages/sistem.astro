@@ -36,7 +36,7 @@ const cronByName = new Map(cronHealth.crons.map((c) => [c.name, c]));
 const age = (iso?: string | null) => iso ? Math.round((Date.now() - new Date(iso).getTime()) / 60_000) : null;
 
 // === 11 STAGES ===
-// Stage ekosistem Sari Glass, Bahasa Indonesia. Tiap stage dapat:
+// Stage ekosistem Sari Glass Bangunan, Bahasa Indonesia. Tiap stage dapat:
 //   - cronName: untuk lookup live health (null = derived dari metric lain, bukan cron)
 //   - icon, title, value, valueLabel, schedule, status, lastSuccessISO
 interface Stage {
@@ -361,7 +361,7 @@ const selectedArticle = articles.find((a) => a.slug === selectedSlug) ?? article
   <div class="card mt-4 p-5">
     <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Tentang halaman ini</div>
     <p class="mt-1 text-sm text-[color:var(--text-secondary)]">
-      Halaman ini menjawab "apa yang sebenarnya sedang terjadi di toko Sari Glass tiap hari?". Tiap node di pipeline adalah cron admin yang berjalan otomatis.
+      Halaman ini menjawab "apa yang sebenarnya sedang terjadi di toko Sari Glass Bangunan tiap hari?". Tiap node di pipeline adalah cron admin yang berjalan otomatis.
       Klik node untuk lihat cron name + jadwalnya; kartu "ranking tracker" & "klik → customer" pakai data GSC yang dipush tiap 05:00 WIB.
     </p>
     <div class="mt-3 grid gap-2 sm:grid-cols-2">
