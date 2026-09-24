@@ -13,8 +13,11 @@ import { createHash } from "node:crypto";
 const Link = z.object({
   keyword: z.string().min(1).max(255),
   article_slug: z.string().min(1).max(255),
+  city: z.string().max(64).nullable().optional(),
+  intent: z.string().max(32).nullable().optional(),
+  priority: z.number().int().min(0).max(999).nullable().optional(),
 });
-const Body = z.object({ links: z.array(Link).max(2000) });
+const Body = z.object({ links: z.array(Link).max(2000), insert_missing: z.boolean().optional().default(false) });
 
 export const POST: APIRoute = async ({ request }) => {
   const key = request.headers.get("X-Ingest-Key") ?? "";
@@ -29,7 +32,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!parsed.success) {
       return Response.json({ ok: false, error: "bad body" }, { status: 400 });
     }
-    let linked = 0;
+    let linked = 0, inserted = 0;
     const missing: string[] = [];
     for (const l of parsed.data.links) {
       const norm = l.keyword.toLowerCase().trim();
@@ -39,10 +42,24 @@ export const POST: APIRoute = async ({ request }) => {
           AND NOT (article_slug <=> ${l.article_slug})
           AND (keyword = ${l.keyword} OR normalized_keyword = ${norm})`);
       const affected = Number((r as any).affectedRows ?? 0);
-      if (affected > 0) linked++;
-      else missing.push(l.keyword);
+      if (affected > 0) { linked++; continue; }
+      // Sudah ter-link slug sama → anggap linked (idempoten).
+      const [same] = await db.execute(sql`
+        SELECT id FROM keyword_inventory WHERE tenant_id = ${tenantId}
+          AND article_slug <=> ${l.article_slug}
+          AND (keyword = ${l.keyword} OR normalized_keyword = ${norm}) LIMIT 1`);
+      if ((same as any[]).length > 0) { linked++; continue; }
+      if (parsed.data.insert_missing) {
+        await db.execute(sql`
+          INSERT INTO keyword_inventory (tenant_id, keyword, status, article_slug, priority, source, city, intent, normalized_keyword)
+          VALUES (${tenantId}, ${l.keyword}, 'antre', ${l.article_slug}, ${l.priority ?? 50}, 'admin-sync', ${l.city ?? null}, ${l.intent ?? null}, ${norm})
+          ON DUPLICATE KEY UPDATE article_slug = VALUES(article_slug), updated_at = NOW()`);
+        inserted++;
+      } else {
+        missing.push(l.keyword);
+      }
     }
-    return Response.json({ ok: true, linked, missing: missing.slice(0, 20), missingTotal: missing.length });
+    return Response.json({ ok: true, linked, inserted, missing: missing.slice(0, 20), missingTotal: missing.length });
   } catch (e) {
     return Response.json({ ok: false, error: e instanceof Error ? e.message.slice(0, 200) : "error" }, { status: 500 });
   }
