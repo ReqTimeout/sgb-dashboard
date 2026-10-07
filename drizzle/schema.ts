@@ -225,3 +225,47 @@ export const auditLog = mysqlTable("audit_log", {
   target: varchar("target", { length: 255 }),
   ts: datetime("ts").notNull(),
 });
+
+// Meta Ads Report (menu /meta-ads): 1 baris = 1 iklan x 1 hari, khusus iklan Bos
+// (owner rule: nama campaign TIDAK diawali prefix exclude, default "INTERAKSI").
+export const metaAdDaily = mysqlTable(
+  "meta_ad_daily",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: int("tenant_id").notNull(),
+    date: varchar("date", { length: 10 }).notNull(), // YYYY-MM-DD
+    campaignId: varchar("campaign_id", { length: 32 }).notNull(),
+    campaignName: varchar("campaign_name", { length: 128 }),
+    adsetName: varchar("adset_name", { length: 128 }),
+    adId: varchar("ad_id", { length: 32 }).notNull(),
+    adName: varchar("ad_name", { length: 128 }),
+    owner: varchar("owner", { length: 8 }).notNull().default("BOS"),
+    spend: double("spend").notNull().default(0),
+    impressions: int("impressions").notNull().default(0),
+    clicks: int("clicks").notNull().default(0),
+    chatStarted: double("chat_started").notNull().default(0),
+    chatReplied: double("chat_replied").notNull().default(0),
+    pixelLead: double("pixel_lead").notNull().default(0),
+    sku: varchar("sku", { length: 64 }),
+    category: varchar("category", { length: 32 }),
+    mapped: boolean("mapped").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_meta_ad_day").on(t.tenantId, t.date, t.adId)],
+);
+
+// Override manual pemetaan iklan -> SKU/kategori (UI nanti / seed awal via producer).
+export const metaAdMapping = mysqlTable(
+  "meta_ad_mapping",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: int("tenant_id").notNull(),
+    adId: varchar("ad_id", { length: 32 }).notNull(),
+    adName: varchar("ad_name", { length: 128 }),
+    sku: varchar("sku", { length: 64 }),
+    category: varchar("category", { length: 32 }),
+    note: varchar("note", { length: 255 }),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_meta_ad_map").on(t.tenantId, t.adId)],
+);

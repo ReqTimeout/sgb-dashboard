@@ -1,0 +1,250 @@
+---
+import Base from "../layouts/Base.astro";
+import StatCard from "../components/StatCard.astro";
+import BarChartLC from "../components/BarChartLC.svelte";
+import LineChartLC from "../components/LineChartLC.svelte";
+import EmptyState from "../components/EmptyState.astro";
+import Icon from "../components/Icon.astro";
+import { getRequestTenant } from "../lib/data";
+import { fmtInt, fmtRp } from "../lib/insights";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { getDb } from "../lib/db";
+import { metaAdDaily } from "../../drizzle/schema";
+
+const user = Astro.locals.user!;
+// Menu "Meta Ads Report": khusus iklan Bos (owner=BOS, bukan INTERAKSI%), 30 hari.
+const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const db = getDb();
+const since60 = new Date();
+since60.setUTCDate(since60.getUTCDate() - 60);
+const rows = await db
+  .select()
+  .from(metaAdDaily)
+  .where(and(eq(metaAdDaily.tenantId, tenant.id), gte(metaAdDaily.date, since60.toISOString().slice(0, 10))))
+  .orderBy(metaAdDaily.date)
+  .limit(5000);
+
+const todayStr = new Date().toISOString().slice(0, 10);
+const d30 = new Date();
+d30.setUTCDate(d30.getUTCDate() - 30);
+const cut30 = d30.toISOString().slice(0, 10);
+const cur = rows.filter((r) => r.date >= cut30);
+const prev = rows.filter((r) => r.date < cut30);
+
+interface Agg { spend: number; imp: number; clicks: number; chat: number; replied: number; lead: number }
+const zero = (): Agg => ({ spend: 0, imp: 0, clicks: 0, chat: 0, replied: 0, lead: 0 });
+const CAT_LABEL: Record<string, string> = {
+  keramik: "Keramik", "bahan-dasar": "Bahan Dasar", sanitary: "Sanitary",
+  listrik: "Listrik", tools: "Tools", cat: "Cat",
+};
+const catName = (c: string | null) => (c && CAT_LABEL[c]) || "Belum terpetakan";
+
+function agg(list: typeof rows): Agg {
+  const a = zero();
+  for (const r of list) {
+    a.spend += r.spend ?? 0; a.imp += r.impressions ?? 0; a.clicks += r.clicks ?? 0;
+    a.chat += r.chatStarted ?? 0; a.replied += r.chatReplied ?? 0; a.lead += r.pixelLead ?? 0;
+  }
+  return a;
+}
+const t = agg(cur);
+const p = agg(prev);
+const rpc = t.chat > 0 ? Math.round(t.spend / t.chat) : 0;
+const ctr = t.imp > 0 ? (t.clicks / t.imp) * 100 : 0;
+const cpc = t.clicks > 0 ? Math.round(t.spend / t.clicks) : 0;
+const hasAny = t.spend + t.chat + t.clicks > 0;
+const pct = (n: number, d: number) => (d > 0 ? ((n - d) / d) * 100 : 0);
+
+// Series harian 30 hari (spend bar + chat line).
+const byDay = new Map<string, Agg>();
+for (const r of cur) {
+  const k = r.date;
+  if (!byDay.has(k)) byDay.set(k, zero());
+  const a = byDay.get(k)!;
+  a.spend += r.spend ?? 0; a.chat += r.chatStarted ?? 0; a.lead += r.pixelLead ?? 0;
+}
+const dayLabels: string[] = [];
+{
+  const d = new Date(d30);
+  while (d.toISOString().slice(0, 10) <= todayStr) {
+    dayLabels.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+}
+const spendSeries = dayLabels.map((dd) => ({ label: dd.slice(5), value: Math.round(byDay.get(dd)?.spend ?? 0) }));
+const chatSeries = dayLabels.map((dd) => ({ date: dd, value: Math.round(byDay.get(dd)?.chat ?? 0) }));
+
+// Per kategori.
+const byCat = new Map<string, Agg & { ads: Set<string> }>();
+for (const r of cur) {
+  const k = r.category ?? "";
+  if (!byCat.has(k)) byCat.set(k, { ...zero(), ads: new Set<string>() });
+  const a = byCat.get(k)!;
+  a.spend += r.spend ?? 0; a.chat += r.chatStarted ?? 0; a.lead += r.pixelLead ?? 0;
+  if (r.adId) a.ads.add(r.adId);
+}
+const catRows = [...byCat.entries()]
+  .map(([k, a]) => ({ key: k, label: catName(k), ...a, nAds: a.ads.size, rpc: a.chat > 0 ? Math.round(a.spend / a.chat) : 0 }))
+  .sort((x, y) => y.spend - x.spend);
+
+// Per iklan (top 20 by spend).
+const byAd = new Map<string, Agg & { ad: string; camp: string; sku: string | null; cat: string | null; mapped: boolean }>();
+for (const r of cur) {
+  const k = r.adId;
+  if (!byAd.has(k)) byAd.set(k, { ...zero(), ad: r.adName ?? k, camp: r.campaignName ?? "", sku: r.sku ?? null, cat: r.category ?? null, mapped: !!r.mapped });
+  const a = byAd.get(k)!;
+  a.spend += r.spend ?? 0; a.imp += r.impressions ?? 0; a.clicks += r.clicks ?? 0;
+  a.chat += r.chatStarted ?? 0; a.replied += r.chatReplied ?? 0; a.lead += r.pixelLead ?? 0;
+  if (r.sku && !a.sku) a.sku = r.sku;
+  if (r.category && !a.cat) a.cat = r.category;
+  if (r.mapped) a.mapped = true;
+}
+const adRows = [...byAd.values()].sort((x, y) => y.spend - x.spend);
+const topAds = adRows.slice(0, 20);
+const unmappedSpend = adRows.filter((a) => !a.mapped).reduce((s, a) => s + a.spend, 0);
+const lastDate = cur.length > 0 ? cur[cur.length - 1].date : "—";
+---
+<Base title="Meta Ads Report" tenantName={tenant.name}>
+  <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="relative z-10 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#34d399]">Meta Ads Report — iklan Bos saja (bukan INTERAKSI) · 30 hari</div>
+        <div class="mt-1 text-display text-3xl sm:text-4xl">
+          {t.chat > 0 && <span>{fmtRp(rpc)}</span>}
+          {t.chat === 0 && <span>Belum ada</span>}
+          <span class="text-xl font-bold text-white/60">{t.chat > 0 && " /chat WA"}</span>
+        </div>
+        <p class="mt-2 max-w-xl text-sm text-white/85">
+          {t.chat > 0 && (
+            <>{fmtInt(t.chat)} chat WA + {fmtInt(t.lead)} lead pixel dari {fmtRp(t.spend)} spend, 30 hari terakhir. Data per {lastDate}.</>
+          )}
+          {t.chat === 0 && (
+            <>Belum ada data 30 hari terakhir. Producer harian (pull-meta-ads-report.py) push ke ingest setelah campaign jalan.</>
+          )}
+        </p>
+      </div>
+      <div class="grid gap-2 sm:gap-3">
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Spend 30h</div>
+          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtRp(t.spend)}</div>
+        </div>
+        <div class="rounded-xl border border-white/15 px-4 py-3">
+          <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Chat WA masuk</div>
+          <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold text-[#34d399]">{fmtInt(t.chat)}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {hasAny ? (
+    <>
+      <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Spend 30 hari" value={fmtRp(t.spend)} delta={pct(t.spend, p.spend)} deltaLabel="vs 30h lalu" spark={spendSeries.slice(-14).map((s) => s.value)} source="Meta Graph Insights level=ad · owner BOS (bukan INTERAKSI%) · producer harian" />
+        <StatCard label="Chat WA masuk" value={fmtInt(t.chat)} delta={pct(t.chat, p.chat)} deltaLabel="vs 30h lalu" ok={t.chat > 0} source="messaging_conversation_started_7d per iklan" />
+        <StatCard label="Lead pixel" value={fmtInt(t.lead)} hint="fb_pixel_lead · jalur website" source="offsite_conversion.fb_pixel_lead per iklan" />
+        <StatCard label="Rp/chat" value={t.chat ? fmtRp(rpc) : "—"} hint={`CTR ${ctr.toFixed(2)}% · CPC ${fmtRp(cpc)}`} warn={t.chat > 0 && rpc > 15000} ok={t.chat > 0 && rpc <= 15000} source="Spend ÷ chat · benchmark CTWA ≤ Rp15rb" />
+      </div>
+
+      <div class="card mt-4 p-5">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Spend harian (Rp) · 30 hari</div>
+        <div class="mt-2">
+          <BarChartLC data={spendSeries} height={200} barClass="fill-[#0081fb]" client:visible />
+        </div>
+        <div class="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Chat WA harian · 30 hari</div>
+        <div class="mt-2">
+          <LineChartLC data={chatSeries} height={200} color="var(--c-good)" client:visible />
+        </div>
+      </div>
+
+      <div class="card mt-4 overflow-hidden">
+        <div class="border-b border-[color:var(--border-subtle)] px-5 py-3">
+          <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
+            <Icon name="tag" size="sm" strokeWidth={1.75} />
+            Per kategori
+            <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">kategori & produk mana yang dapat chat</span>
+          </h2>
+        </div>
+        <ul class="divide-y divide-[color:var(--border-subtle)]">
+          {catRows.map((c) => (
+            <li class="flex flex-col gap-1 px-5 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="font-semibold">{c.label}</span>
+                  {c.key === "" && <span class="chip chip-danger shrink-0 !text-[9px]">belum terpetakan</span>}
+                  <span class="text-[11px] text-[color:var(--text-faint)]">{c.nAds} iklan</span>
+                </div>
+                <div class="mt-1 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-[color:var(--border-subtle)]">
+                  <div class="h-full rounded-full" style={`width:${t.spend > 0 ? Math.round((c.spend / t.spend) * 100) : 0}%;background:var(--brand)`}></div>
+                </div>
+              </div>
+              <div class="flex shrink-0 items-center gap-4 text-right">
+                <div>
+                  <div class="font-[family-name:var(--font-display)] text-base font-extrabold">{fmtInt(c.chat)} <span class="text-[11px] font-medium text-[color:var(--text-faint)]">chat</span></div>
+                  <div class="text-[11px] text-[color:var(--text-muted)]">{fmtInt(c.lead)} lead</div>
+                </div>
+                <div>
+                  <div class="font-[family-name:var(--font-display)] text-base font-extrabold">{fmtRp(c.spend)}</div>
+                  <div class="text-[11px] text-[color:var(--text-muted)]">{c.chat > 0 ? `${fmtRp(c.rpc)}/chat` : "—"}</div>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div class="card mt-4 overflow-hidden">
+        <div class="border-b border-[color:var(--border-subtle)] px-5 py-3">
+          <h2 class="flex items-center gap-2 font-[family-name:var(--font-heading)] text-sm font-bold">
+            <Icon name="ad" size="sm" strokeWidth={1.75} />
+            Per produk / iklan
+            <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">top 20 by spend · 30 hari</span>
+          </h2>
+        </div>
+        <ul class="divide-y divide-[color:var(--border-subtle)]">
+          {topAds.map((a) => (
+            <li class="flex flex-col gap-1 px-5 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="truncate font-semibold">{a.ad}</span>
+                  {a.mapped
+                    ? <span class="chip chip-success shrink-0 !text-[9px]">{a.cat ? catName(a.cat) : "terpetakan"}</span>
+                    : <span class="chip shrink-0 !text-[9px]">belum terpetakan</span>}
+                </div>
+                <div class="truncate text-[11px] text-[color:var(--text-faint)]">{a.camp}{a.sku ? ` · SKU ${a.sku}` : ""}</div>
+              </div>
+              <div class="flex shrink-0 items-center gap-4 text-right">
+                <div>
+                  <div class="font-[family-name:var(--font-display)] text-base font-extrabold">{fmtInt(a.chat)} <span class="text-[11px] font-medium text-[color:var(--text-faint)]">chat</span></div>
+                  <div class="text-[11px] text-[color:var(--text-muted)]">{fmtInt(a.lead)} lead · {fmtInt(a.replied)} dibalas</div>
+                </div>
+                <div>
+                  <div class="font-[family-name:var(--font-display)] text-base font-extrabold">{fmtRp(a.spend)}</div>
+                  <div class="text-[11px] text-[color:var(--text-muted)]">{(a.chat + a.lead) > 0 ? `${fmtRp(Math.round(a.spend / (a.chat + a.lead)))}/hasil` : "—"}</div>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {unmappedSpend > 0 && (
+        <div class="card mt-4 border p-5" style="border-color: var(--warning);">
+          <div class="text-sm font-bold">⚠️ {fmtRp(unmappedSpend)} spend belum terpetakan ke produk</div>
+          <p class="mt-1 text-xs text-[color:var(--text-muted)]">
+            Iklan dengan nama generik (Ad Boost, COUROSEL, FOTO) atau nama yang tidak ada di katalog
+            (DENVER, Rochester Blue, INA) tidak bisa dipetakan otomatis. Konfirmasi nama produknya
+            ke agency untuk dimasukkan ke tabel mapping — atau wajibkan format nama
+            <code>[KATEGORI] Nama Produk</code> untuk iklan baru.
+          </p>
+        </div>
+      )}
+    </>
+  ) : (
+    <div class="mt-4">
+      <EmptyState title="Belum ada data Meta Ads" message="Jalankan producer pull-meta-ads-report.py --post ke /api/ingest/meta-ads untuk mengisi 30 hari pertama." />
+    </div>
+  )}
+</Base>
