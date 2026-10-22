@@ -8,7 +8,7 @@ import Icon from "../components/Icon.astro";
 import InfoHint from "../components/InfoHint.astro";
 import UtmCopy from "../components/UtmCopy.svelte";
 import PauseAdModal from "../components/PauseAdModal.svelte";
-import { getRequestTenant, series, sumRange } from "../lib/data";
+import { getRequestTenant, series, sumRange, channelStatus } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { scoreLead } from "../lib/ai/lead-score";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
@@ -35,6 +35,8 @@ const mClicks = sumRange(clicks, 30, 0);
 const mChats = sumRange(chatStarted, 30, 0);
 const mReplied = sumRange(chatReplied, 30, 0);
 const gSpend = sumRange(google, 30, 0);
+// Status channel Google Ads: jangan tampilkan channel kosong seolah-olah ada datanya.
+const gStatus = await channelStatus(tenant.id, "google_ads", 30);
 const oClicks = sumRange(organicClicks, 30, 0);
 
 const cpaChat = mChats > 0 ? Math.round(mSpend / mChats) : 0;
@@ -396,25 +398,37 @@ try {
       <span class="inline-flex items-center gap-1 font-semibold text-[color:var(--text-secondary)]">
         <Icon name="info" size="xs" />
         Benchmark CTWA Indonesia
-      </span>: CPA per chat Rp2-15rb (sehat), Rp15-30rb (pantau), {">"}Rp30rb (mahal). Benchmark berlaku untuk toko ritel bahan bangunan lokal.
+      </span>: CPA per chat Rp2-15rb (sehat), Rp15-30rb (pantau), di atas Rp30rb (mahal). Benchmark berlaku untuk toko ritel bahan bangunan lokal.
     </div>
   </div>
 
-  {gSpend > 0 ? (
+  {gStatus.hasRows ? (
     <div class="card mt-4 p-5">
       <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Google Ads <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">{fmtRp(gSpend)} spend 30h</span></h2>
-      <p class="mt-2 text-sm text-[color:var(--text-muted)]">Siap aktif — campaign pertama menunggu perintah Bos. Konversi via GA4 import sudah live.</p>
+      <p class="mt-2 text-sm text-[color:var(--text-muted)]">
+        Data spend, klik, dan konversi ditarik otomatis dari Google Ads API tiap 05:35 WIB.
+        {gStatus.hasSpend ? "" : "Belum ada belanja pada periode ini — campaign ada tapi belum jalan."}
+      </p>
     </div>
   ) : (
-    <div class="card mt-4 flex items-start gap-3 p-4" style="background: linear-gradient(135deg, rgb(245 158 11 / 0.06), transparent);">
+    <div class="card mt-4 flex items-start gap-3 p-4">
       <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--warning-soft)] text-[color:var(--warning)]">
         <Icon name="rocket" size="sm" strokeWidth={1.75} />
       </span>
       <div class="flex-1">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--warning)]">Google Ads siap aktif</div>
+        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--warning)]">Google Ads belum aktif</div>
         <p class="mt-1 flex items-start gap-2 text-sm text-[color:var(--text-secondary)]">
           <Icon name="info" size="xs" class="mt-0.5 shrink-0 text-[color:var(--warning)]" />
-          Tracker GA4 sudah terpasang — data {fmtRp(gSpend)} spend akan masuk otomatis begitu campaign pertama jalan. Siap aktif — campaign pertama menunggu perintah Bos; tidak ada campaign yang dibuat otomatis.
+          <span>
+            Koneksi ke Google Ads sudah tersambung (token OAuth tersimpan, sinkron otomatis 05:35 WIB),
+            tetapi akun ini belum punya satu pun campaign — jadi belum ada spend, klik, atau konversi
+            yang bisa ditampilkan. Campaign dibuat manual di Google Ads, tidak ada campaign yang
+            dibuat otomatis.
+          </span>
+        </p>
+        <p class="mt-2 text-[11px] text-[color:var(--text-faint)]">
+          Konversi di toko belum terpasang juga (ID konversi Google Ads masih kosong) — isi di
+          Pengaturan toko → Tracking iklan sebelum campaign pertama jalan.
         </p>
       </div>
     </div>

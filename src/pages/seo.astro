@@ -6,12 +6,15 @@ import BarChartLC from "../components/BarChartLC.svelte";
 import Icon from "../components/Icon.astro";
 import InfoHint from "../components/InfoHint.astro";
 import EmptyState from "../components/EmptyState.astro";
-import { getRequestTenant, latestRanks, series, sumRange } from "../lib/data";
+import { getRequestTenant, latestRanks, series, sumRange, channelStatus } from "../lib/data";
 import { fmtInt, fmtNum, fmtPct, fmtRp } from "../lib/insights";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+// Status channel iklan Google (supaya tidak tampil sebagai panel kosong).
+const gStatus = await channelStatus(tenant.id, "google_ads", 30);
 
 const clicks = await series(tenant.id, "seo", "clicks", 90);
 const impr = await series(tenant.id, "seo", "impressions", 90);
@@ -111,6 +114,33 @@ const heroNarative = totClicks > 0
       ) : (
         <p class="py-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada data — push GSC pertama jalan 05:00 WIB.</p>
       )}
+    </div>
+  </div>
+
+  <!-- GOOGLE ADS: status channel (belum ada campaign = belum ada data) -->
+  <div class="card mt-4 p-5">
+    <div class="flex items-center gap-3">
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[color:var(--warning-soft)] text-[color:var(--warning)]">
+        <Icon name="rocket" size="md" strokeWidth={1.75} />
+      </div>
+      <div class="flex-1">
+        <div class="font-[family-name:var(--font-heading)] text-sm font-bold">Google Ads <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">spend, klik & konversi</span></div>
+        {gStatus.hasRows ? (
+          <p class="mt-0.5 text-xs text-[color:var(--text-muted)]">
+            Data ditarik otomatis dari Google Ads API tiap 05:35 WIB
+            {gStatus.lastDate ? ` · data terakhir ${gStatus.lastDate}` : ""}
+            {gStatus.hasSpend ? "" : " · belum ada belanja pada periode ini"}
+          </p>
+        ) : (
+          <p class="mt-0.5 text-xs text-[color:var(--text-muted)]">
+            Koneksi OAuth sudah tersambung, tetapi akun ini belum punya campaign — jadi belum ada
+            spend, klik, atau konversi yang bisa ditampilkan. Campaign dibuat manual di Google Ads.
+          </p>
+        )}
+      </div>
+      <span class:list={["chip shrink-0 text-[10px]", gStatus.hasRows ? "chip-success" : "chip"]}>
+        {gStatus.hasRows ? "ada data" : "belum ada campaign"}
+      </span>
     </div>
   </div>
 

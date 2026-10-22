@@ -56,6 +56,54 @@ export function sumRange(pts: Point[], fromDaysAgo: number, toDaysAgo: number): 
   return pts.filter((p) => p.date >= s && p.date <= e).reduce((a, p) => a + p.value, 0);
 }
 
+export interface ChannelStatus {
+  /** Ada baris daily_metrics di channel ini (nilai boleh 0). */
+  hasRows: boolean;
+  /** Ada spend > 0 di periode. */
+  hasSpend: boolean;
+  /** Tanggal data terakhir. */
+  lastDate: string | null;
+  /** Total spend periode. */
+  spend: number;
+  /** Jumlah hari yang punya baris spend. */
+  days: number;
+}
+
+/**
+ * Status sebuah channel iklan — dipakai supaya dashboard tidak menampilkan
+ * channel kosong (Rp0) seolah-olah itu data. Bedakan:
+ *   hasRows=false → channel belum pernah kirim data sama sekali (mis. belum ada campaign)
+ *   hasRows=true, hasSpend=false → ada campaign tapi belum ada belanja
+ */
+export async function channelStatus(
+  tenantId: number,
+  channel: string,
+  days = 30,
+): Promise<ChannelStatus> {
+  const db = getDb();
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - days);
+  const rows = await db
+    .select({ date: dailyMetrics.date, valueNum: dailyMetrics.valueNum })
+    .from(dailyMetrics)
+    .where(
+      and(
+        eq(dailyMetrics.tenantId, tenantId),
+        eq(dailyMetrics.channel, channel),
+        eq(dailyMetrics.metric, "spend"),
+        gte(dailyMetrics.date, since.toISOString().slice(0, 10)),
+      ),
+    );
+  const spend = rows.reduce((a, r) => a + (r.valueNum ?? 0), 0);
+  return {
+    hasRows: rows.length > 0,
+    hasSpend: spend > 0,
+    lastDate: rows.length ? rows.map((r) => r.date).sort().at(-1) ?? null : null,
+    spend,
+    days: rows.length,
+  };
+}
+
 export async function latestMetric(tenantId: number, channel: string, metric: string): Promise<Point | null> {
   const db = getDb();
   const rows = await db

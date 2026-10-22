@@ -1,7 +1,7 @@
 ---
 import { getDb } from "../../lib/db";
 import { sharedLinks } from "../../../drizzle/schema";
-import { series, sumRange, getRequestTenant } from "../../lib/data";
+import { series, sumRange, getRequestTenant, channelStatus } from "../../lib/data";
 import type { Tenant } from "../../lib/tenant";
 import { eq } from "drizzle-orm";
 import { fmtInt, fmtRp } from "../../lib/insights";
@@ -29,6 +29,7 @@ if (link && !tenant) {
 const status = Astro.response.status;
 
 let mSpend = 0, mChats = 0, gSpend = 0, gConv = 0, orgClicks = 0;
+let gStatus = { hasRows: false, hasSpend: false, lastDate: null as string | null, spend: 0, days: 0 };
 let spendDaily: { date: string; value: number }[] = [];
 if (tenant) {
   mSpend = sumRange(await series(tenant.id, "meta_ads", "spend", 30), 30, 0);
@@ -37,7 +38,9 @@ if (tenant) {
   gConv = Math.round(sumRange(await series(tenant.id, "google_ads", "conversions", 30), 30, 0));
   orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0));
   spendDaily = await series(tenant.id, "meta_ads", "spend", 14);
+  gStatus = await channelStatus(tenant.id, "google_ads", 30);
 }
+const adsLabel = gStatus.hasRows ? "Meta + Google" : "Meta";
 ---
 <!doctype html>
 <html lang="id">
@@ -90,7 +93,7 @@ if (tenant) {
 
           <div class="grid">
             <div class="card"><div class="lbl">Klik Google</div><div class="num">{fmtInt(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0))}</div><div class="sub">dari Search organik</div></div>
-            <div class="card"><div class="lbl">Belanja iklan</div><div class="num">{fmtRp(mSpend + gSpend)}</div><div class="sub">Meta + Google</div></div>
+            <div class="card"><div class="lbl">Belanja iklan</div><div class="num">{fmtRp(mSpend + gSpend)}</div><div class="sub">{adsLabel}</div></div>
             <div class="card"><div class="lbl">Prospek</div><div class="num">{fmtInt(mChats + gConv)}</div><div class="sub">chat + konversi</div></div>
             <div class="card"><div class="lbl">Nilai SEO</div><div class="num">Rp{Math.round((orgClicks * 1500) / 1000)}rb</div><div class="sub">estimasi</div></div>
           </div>
@@ -120,7 +123,9 @@ if (tenant) {
             <div class="lbl">Ringkasan per channel</div>
             <div class="row"><span>Meta Ads · chat</span> <strong>{fmtInt(mChats)}</strong></div>
             <div class="row"><span>Meta Ads · CPA per chat</span> <strong>{mChats ? fmtRp(Math.round(mSpend / mChats)) : "—"}</strong></div>
-            <div class="row"><span>Google Ads · konversi</span> <strong>{fmtInt(gConv)}</strong></div>
+                        {gStatus.hasRows && (
+              <div class="row"><span>Google Ads · konversi</span> <strong>{fmtInt(gConv)}</strong></div>
+            )}
             <div class="row"><span>Organik · klik</span> <strong>{fmtInt(orgClicks)}</strong></div>
           </div>
 

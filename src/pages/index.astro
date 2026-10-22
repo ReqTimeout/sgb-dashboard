@@ -5,7 +5,7 @@ import AreaChartLC from "../components/AreaChartLC.svelte";
 import CopilotWidget from "../components/CopilotWidget.svelte";
 import InfoHint from "../components/InfoHint.astro";
 import Icon from "../components/Icon.astro";
-import { getRequestTenant, latestMetric, series, sumRange } from "../lib/data";
+import { getRequestTenant, latestMetric, series, sumRange, channelStatus } from "../lib/data";
 import { delta, fmtInt, fmtNum, fmtRp, greet } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
@@ -29,6 +29,7 @@ const leads = await latestMetric(tenant.id, "wa", "leads");
 const mSpend7 = sumRange(await series(tenant.id, "meta_ads", "spend", 10), 8, 2);
 const mChats7 = sumRange(await series(tenant.id, "meta_ads", "leads", 10), 8, 2);
 const gSpend7 = sumRange(await series(tenant.id, "google_ads", "spend", 10), 8, 2);
+const gStatus7 = await channelStatus(tenant.id, "google_ads", 30);
 const staleCut = new Date(Date.now() - 12 * 3600 * 1000);
 const staleOldQ = await getDb()
   .select({ id: leadEvents.id, ts: leadEvents.ts })
@@ -43,7 +44,7 @@ const mCpa7 = mChats7 > 0 ? mSpend7 / mChats7 : 0;
 const channels = [
   { href: "/seo", label: "SEO", ok: sum7 > 0, warn: (d.pct ?? 0) < -10, note: sum7 > 0 ? `${fmtInt(sum7)} klik/7h` : "belum ada klik" },
   { href: "/iklan", label: "Meta", ok: mSpend7 > 0, warn: mCpa7 > 15000, note: mSpend7 > 0 ? `${fmtRp(mCpa7)}/chat` : "tidak ada spend" },
-  { href: "/iklan", label: "Google", ok: gSpend7 > 0, warn: false, note: gSpend7 > 0 ? `${fmtRp(gSpend7)}/7h` : "menunggu perintah Bos" },
+  { href: "/iklan", label: "Google", ok: gSpend7 > 0, warn: false, note: gSpend7 > 0 ? `${fmtRp(gSpend7)}/7h` : gStatus7.hasRows ? "tidak ada spend" : "belum ada campaign" },
   { href: "/leads", label: "WA", ok: staleOldN === 0, warn: staleOldN > 0, note: staleOldN > 0 ? `${staleOldN} mendesak` : "pipeline bersih" },
   { href: "/konten", label: "Konten", ok: (pub?.value ?? 0) > 0, warn: false, note: pub24?.value ? `+${fmtInt(pub24.value)} kemarin` : `${fmtInt(pub?.value ?? 0)} total` },
 ];

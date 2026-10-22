@@ -103,7 +103,7 @@ const channels: ChStat[] = [
     mSpend > 0
       ? (mChats > 0 ? `${fmtRp(mCpa)}/chat · ${fmtRp(mSpend)} spend` : `Belum ada chat · ${fmtRp(mSpend)} spend`)
       : "Belum ada belanja iklan"),
-  chStat("Google Ads", "/iklan", gSpend > 0 ? `${fmtRp(gSpend)} spend · ${gConv} konversi` : "Menunggu perintah Bos"),
+  chStat("Google Ads", "/iklan", gSpend > 0 ? `${fmtRp(gSpend)} spend · ${gConv} konversi` : "Belum ada campaign di akun Ads"),
   chStat("Organik", "/seo", `${fmtInt(orgClicks)} klik gratis/30h${orgClicks === 0 ? "" : " · dari Google"}`),
   chStat("Promo", "/iklan", "dari halaman /promo/*"),
   chStat("Langsung", "/leads", "tanpa perantara"),

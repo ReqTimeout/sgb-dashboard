@@ -3,7 +3,7 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import BarChartLC from "../components/BarChartLC.svelte";
 import InfoHint from "../components/InfoHint.astro";
-import { getRequestTenant, series, sumRange } from "../lib/data";
+import { getRequestTenant, series, sumRange, channelStatus } from "../lib/data";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
@@ -19,6 +19,12 @@ const mChatsS = await series(tenant.id, "meta_ads", "leads", 30);
 const mRepliedS = await series(tenant.id, "meta_ads", "chat_replied", 30);
 const gSpend = sumRange(await series(tenant.id, "google_ads", "spend", 30), 30, 0);
 const gConv = Math.round(sumRange(await series(tenant.id, "google_ads", "conversions", 30), 30, 0));
+const gStatus = await channelStatus(tenant.id, "google_ads", 30);
+// Label gabungan hanya menyebut channel yang benar-benar punya data.
+const adsLabel = gStatus.hasRows ? "Meta + Google" : "Meta";
+const adsSource = gStatus.hasRows
+  ? "Meta Graph insights (05:30) + Google Ads API (05:35)"
+  : "Meta Graph insights (05:30)";
 const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0));
 
 const mSpend = sumRange(mSpendS, 30, 0);
@@ -112,10 +118,10 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
         <div class="rounded-xl border border-white/15 px-4 py-3">
           <div class="flex items-center gap-1.5 text-[10px] text-white/55 uppercase tracking-[0.12em]">
             <span>Biaya per prospek</span>
-            <InfoHint source="Meta + Google" fresh="05:30 · 05:35 WIB" tooltip={`Total spend 30h ÷ total leads (Meta ${fmtInt(mChats)} + Google ${fmtInt(gConv)} chat/konversi).`} variant="info" />
+            <InfoHint source={adsLabel} fresh="05:30 · 05:35 WIB" tooltip={gStatus.hasRows ? `Total spend 30h ÷ total leads (Meta ${fmtInt(mChats)} + Google ${fmtInt(gConv)} chat/konversi).` : `Total spend 30h ÷ total leads (Meta ${fmtInt(mChats)} chat).`} variant="info" />
           </div>
           <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold">{totalLeads ? fmtRp(cpa) : "—"}</div>
-          <div class="text-[10px] text-white/55">gabungan Meta + Google</div>
+          <div class="text-[10px] text-white/55">gabungan {adsLabel}</div>
         </div>
       </div>
     </div>
@@ -146,10 +152,10 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
   </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Total belanja 30 hari" value={fmtRp(totalSpend)} hint="Meta + Google · 05:30 + 05:35 WIB" source={"Σ 30 hari: Meta Graph insights (05:30) + Google Ads API (05:35)"} />
-    <StatCard label="Prospek dari iklan" value={fmtInt(totalLeads)} hint="Meta CTWA (langsung ke WA, lewat website) · bukan /leads" ok={totalLeads > 0} source={"Meta chat_started + Google Ads conversions. Chat dari iklan TIDAK lewat website — masuk langsung ke WA CS."} />
+    <StatCard label="Total belanja 30 hari" value={fmtRp(totalSpend)} hint={`${adsLabel} · 05:30 + 05:35 WIB`} source={`Σ 30 hari: ${adsSource}`} />
+    <StatCard label="Prospek dari iklan" value={fmtInt(totalLeads)} hint="Meta CTWA (langsung ke WA, lewat website) · bukan /leads" ok={totalLeads > 0} source={gStatus.hasRows ? "Meta chat_started + Google Ads conversions. Chat dari iklan TIDAK lewat website — masuk langsung ke WA CS." : "Meta chat_started. Chat dari iklan TIDAK lewat website — masuk langsung ke WA CS."} />
     <StatCard label="Kunjungan organik" value={fmtInt(orgClicks)} hint={`senilai ${fmtRp(organicValue)} · GSC 05:00`} ok={orgClicks > 0} source={"GSC clicks 30h · estimasi nilai pakai CPC Meta acuan Rp1.500 (pembanding kasar)"} />
-    <StatCard label="Biaya per prospek" value={totalLeads ? fmtRp(cpa) : "—"} hint="gabungan semua channel · benchmark ≤Rp15rb" warn={cpa > 500000} ok={totalLeads > 0 && cpa <= 15000} source={"Total spend ÷ total leads · blended Meta+Google · CTWA Indonesia sehat ≤Rp15rb/chat"} />
+    <StatCard label="Biaya per prospek" value={totalLeads ? fmtRp(cpa) : "—"} hint="gabungan semua channel · benchmark ≤Rp15rb" warn={cpa > 500000} ok={totalLeads > 0 && cpa <= 15000} source={`Total spend ÷ total leads · blended ${adsLabel} · CTWA Indonesia sehat ≤Rp15rb/chat`} />
   </div>
 
   {revenue > 0 && (
@@ -208,7 +214,7 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
         </div>
         <span class="chip text-[10px]">30 hari</span>
       </div>
-      {gSpend > 0 ? (
+      {gStatus.hasRows ? (
         <div class="mt-3 grid grid-cols-3 gap-2 text-center">
           <div><div class="font-[family-name:var(--font-mono-num)] text-lg font-extrabold">{fmtRp(gSpend)}</div><div class="text-[10px] text-[color:var(--text-faint)]">belanja</div></div>
           <div><div class="font-[family-name:var(--font-mono-num)] text-lg font-extrabold">{fmtInt(gConv)}</div><div class="text-[10px] text-[color:var(--text-faint)]">konversi</div></div>
@@ -216,7 +222,7 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
         </div>
       ) : (
         <div class="mt-3 rounded-lg bg-[color:var(--bg-surface-2)]/60 p-4 text-sm text-[color:var(--text-muted)]">
-          Siap aktif — campaign pertama menunggu perintah Bos. Tracker GA4 sudah online, data akan muncul otomatis begitu campaign pertama jalan.
+          Koneksi ke Google Ads tersambung, tapi akun ini belum punya campaign — jadi belum ada spend atau konversi yang bisa ditampilkan.
         </div>
       )}
     </div>
