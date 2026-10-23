@@ -63,7 +63,7 @@ const stages: Stage[] = [
   },
   {
     n: 2, icon: "edit", title: "Draft generator",
-    value: "LLM",
+    value: "template-v1",
     valueLabel: "gen-from-queue",
     schedule: "manual / cron",
     status: "idle",
@@ -82,11 +82,11 @@ const stages: Stage[] = [
   {
     n: 4, icon: "send", title: "Terbit publish",
     value: fmtInt(articlesN),
-    valueLabel: "artikel live di Google",
+    valueLabel: "artikel sudah publish",
     schedule: "publish-articles 06:00",
     status: cronByName.get("publish-articles")?.ok ? "live" : "pending",
     cronName: "publish-articles",
-    desc: "Kirim file markdown ke GitHub repo toko publik → Hostinger auto-deploy dalam 1-2 menit → artikel live di sariglassbangunan.com/blog/{slug}/.",
+    desc: "Kirim file markdown ke GitHub repo toko publik → Hostinger auto-deploy dalam 1-2 menit → artikel terbit di sariglassbangunan.com/blog/{slug}/ (terbit ≠ ter-index; indeks dipantau di panel SEO admin).",
   },
   {
     n: 5, icon: "rocket", title: "Sitemap ping",

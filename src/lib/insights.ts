@@ -110,6 +110,13 @@ export function formatTanggal(iso: string | Date, withDay = false): string {
 /**
  * formatWaktu: "HH:MM WIB"
  */
+// E9-A7: tanggal singkat untuk badge freshness ("data per 22 Okt").
+export function fmtDay(iso?: string | Date | null): string {
+  if (!iso) return "—";
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "short", timeZone: "UTC" });
+}
 export function formatWaktu(iso?: string | Date | null): string {
   const d = iso ? (typeof iso === "string" ? new Date(iso) : iso) : new Date();
   if (isNaN(d.getTime())) return "—";

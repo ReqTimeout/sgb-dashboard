@@ -122,7 +122,7 @@ const filteredRows = rows.slice(0, periodDays);
             <div class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
               <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{num(p, "clicks_y")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Klik</div></div>
               <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{num(p, "articles_new")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Artikel baru</div></div>
-              <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{num(p, "submitted")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">URL submit</div></div>
+              <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold" title="URL dikirim ke Google — BUKAN yang ter-index. Count ter-index ada di panel SEO admin.">{num(p, "submitted")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">URL dikirim (bukan indexed)</div></div>
               <div class="rounded-lg bg-[color:var(--bg-surface)] p-3"><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{num(p, "cron_err")}</div><div class="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Cron error</div></div>
             </div>
           </div>

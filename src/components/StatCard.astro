@@ -1,5 +1,6 @@
 ---
 import Sparkline from "./Sparkline.astro";
+import { fmtDay } from "../lib/insights";
 import Icon from "./Icon.astro";
 
 interface Props {
@@ -12,8 +13,9 @@ interface Props {
   spark?: number[];
   warn?: boolean;
   ok?: boolean;
+  fresh?: string | Date | null; // E9-A7: kapan data angka ini berasal
 }
-const { label, value, delta, deltaLabel, hint, source, spark, warn, ok } = Astro.props;
+const { label, value, delta, deltaLabel, hint, source, spark, warn, ok, fresh } = Astro.props;
 const deltaPos = (delta ?? 0) > 0;
 const deltaNeg = (delta ?? 0) < 0;
 const deltaCls = warn
@@ -39,6 +41,7 @@ const toneDot = warn ? "var(--danger)" : ok ? "var(--success)" : "var(--border-s
   <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
     {(warn || ok) && <span class="h-1.5 w-1.5 rounded-full" style={`background:${toneDot}`}></span>}
     <span class="flex-1 truncate">{label}</span>
+    {fresh && <span class="shrink-0 font-[family-name:var(--font-mono-num)] text-[9px] font-bold uppercase tracking-normal text-[color:var(--text-faint)]" title="Tanggal sumber data angka ini (bukan waktu render halaman)">· {fmtDay(fresh)}</span>}
     {source && (
       <span class="group relative inline-flex cursor-help">
         <Icon name="info" size="xs" class="opacity-60 group-hover:opacity-100" />

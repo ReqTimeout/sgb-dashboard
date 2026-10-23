@@ -7,6 +7,7 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import { leadEvents } from "../../drizzle/schema";
 import { fetchCronHealth } from "../lib/admin-crons";
+import { formatWaktu } from "../lib/insights";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
@@ -24,7 +25,30 @@ async function check(url: string, timeoutMs = 6000): Promise<{ ok: boolean; note
 
 const STORE = "https://sariglassbangunan.com";
 const cronHealth = await fetchCronHealth().catch(() => ({ crons: [], fetchedAt: 0, source: "fallback" as const }));
-const gw = await check("https://capi.beriklan.co.id/healthz");
+// E9-A6: /healthz SELALU balas HTTP 200 selama proses hidup — sehat ≠ license aktif.
+let capiProbe = { ok: false, note: "down" };
+try {
+  const r = await fetch("https://capi.beriklan.co.id/healthz", { signal: AbortSignal.timeout(6000) });
+  if (r.ok) {
+    const j = (await r.json().catch(() => (null))) as { ok?: boolean; license?: string; licence_expiry?: string } | null;
+    const lic = String(j?.license ?? "?");
+    capiProbe = { ok: lic === "active", note: lic === "active" ? `license s/d ${j?.licence_expiry ?? "?"}` : `license ${lic.toUpperCase()}` };
+  } else capiProbe = { ok: false, note: `HTTP ${r.status}` };
+} catch (e) { capiProbe = { ok: false, note: e instanceof Error ? e.message.slice(0, 30) : "down" }; }
+// E9-A5: probe NYATA hop yang dulu hardcoded — fetch homepage sekali, dua sinyal.
+let siteProbe = { ok: false, note: "down" };
+try {
+  const r = await fetch(`${STORE}/`, { signal: AbortSignal.timeout(6000) });
+  const html = r.ok ? await r.text() : "";
+  const wa = (html.match(/wa\.me/g) ?? []).length;
+  const dl = html.includes("GTM-WQ2BFWVL") || html.includes("dataLayer");
+  siteProbe = { ok: r.ok && wa > 0, note: r.ok ? `200 · ${wa} link wa.me · ${dl ? "dataLayer+beacon terpasang" : "dataLayer TIDAK ketemu"}` : `HTTP ${r.status}` };
+} catch (e) { siteProbe = { ok: false, note: e instanceof Error ? e.message.slice(0, 30) : "down" }; }
+let adminProbe = { ok: false, note: "down" };
+try {
+  const r = await fetch("https://admin.sariglassbangunan.com/api/v1/events", { signal: AbortSignal.timeout(6000) });
+  adminProbe = { ok: r.status === 204 || r.ok, note: r.status === 204 ? "204 · endpoint hidup (tanpa event)" : `HTTP ${r.status}` };
+} catch (e) { adminProbe = { ok: false, note: e instanceof Error ? e.message.slice(0, 30) : "down" }; }
 const sitemapCheck = await check(`${STORE}/sitemap.xml`).catch(() => ({ ok: true, note: "private" })); // opsional
 const gtmCheck = await check("https://www.googletagmanager.com/gtm.js?id=GTM-WQ2BFWVL");
 
@@ -78,12 +102,12 @@ const initEvents = events.map((r) => ({
 
 // === 6 HOP (urutan alur) ===
 const hops = [
-  { id: "site",  title: "Tombol WA", url: "sariglassbangunan.com/produk/...", ok: true,                note: "klik pertama" },
-  { id: "beacon", title: "Beacon situs", url: "tracking-beacon.ts", ok: true,                            note: "tambah event_id, kirim fetch" },
-  { id: "admin", title: "Admin /api/v1/events", url: "admin.sariglassbangunan.com", ok: true,        note: "log + capi fan-out" },
-  { id: "capi",  title: "CAPI gateway", url: "capi.beriklan.co.id/healthz", ok: gw.ok,                 note: gw.note },
+  { id: "site",  title: "Tombol WA + Beacon", url: "sariglassbangunan.com/", ok: siteProbe.ok, note: siteProbe.note },
+  { id: "beacon", title: "Beacon situs", url: "tracking-beacon.ts (chunk)", ok: siteProbe.ok,           note: "tertas di homepage — fetch event_id → admin" },
+  { id: "admin", title: "Admin /api/v1/events", url: "admin.sariglassbangunan.com", ok: adminProbe.ok, note: `${adminProbe.note} · log + capi fan-out` },
+  { id: "capi",  title: "CAPI gateway", url: "capi.beriklan.co.id/healthz", ok: capiProbe.ok,          note: capiProbe.note },
   { id: "gtm",   title: "GTM (Pixel+GA4)", url: "GTM-WQ2BFWVL", ok: gtmCheck.ok,                         note: gtmCheck.note },
-  { id: "sbg",   title: "Dashboard ini", url: "sgb.beriklan.co.id/tracking", ok: true,                note: "live di log bawah" },
+  { id: "sbg",   title: "Dashboard ini", url: "sgb.beriklan.co.id/tracking", ok: true,                note: `SSR render ${formatWaktu(new Date())}` },
 ];
 
 const allHealthy = hops.every((h) => h.ok);
