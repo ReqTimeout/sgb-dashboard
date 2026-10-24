@@ -73,6 +73,59 @@ export async function fetchCronHealth(): Promise<CronHealth> {
   return { crons: [], fetchedAt: Date.now(), source: "fallback" };
 }
 
+// ── Diagnosa pengiriman email (audit 24 Okt 2026) ──
+// Laporan harian + alert anomali sempat gagal terkirim 3+ hari karena
+// Hostinger menolak alamat From ("553 5.7.1 Sender address rejected"),
+// padahal semua cron tercatat OK. Diagnosa ini membuat akar masalahnya
+// terlihat di /health, plus ada tombol tes kirim.
+export interface EmailHealth {
+  configured: boolean;
+  host: string;
+  port: string;
+  recipients: string;
+  candidates: { from: string; authOk: boolean; sendOk: boolean; error: string }[];
+  error?: string;
+  fetchedAt: number;
+}
+
+export async function fetchEmailHealth(): Promise<EmailHealth | null> {
+  const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
+  const token = process.env.ADMIN_CRON_TOKEN ?? "";
+  try {
+    const r = await fetch(`${adminUrl}/api/audit/email`, {
+      headers: { "X-Admin-Token": token },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return {
+      configured: !!j.configured,
+      host: j.host ?? "?",
+      port: j.port ?? "?",
+      recipients: j.recipients ?? "?",
+      candidates: j.candidates ?? [],
+      error: j.error ?? undefined,
+      fetchedAt: Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Kirim satu email uji lewat admin (tombol "Tes kirim" di /health).
+export async function sendEmailTest(to?: string): Promise<{ ok: boolean; error?: string; from?: string }> {
+  const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
+  const token = process.env.ADMIN_CRON_TOKEN ?? "";
+  const r = await fetch(`${adminUrl}/api/audit/email`, {
+    method: "POST",
+    headers: { "X-Admin-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify(to ? { to } : {}),
+    signal: AbortSignal.timeout(25_000),
+  });
+  const j = await r.json().catch(() => ({}));
+  return { ok: !!j.ok, error: j.error, from: j.from };
+}
+
 /**
  * Lookup apakah cron tertentu sehat. Returns true kalau ada row sukses 24 jam terakhir.
  */

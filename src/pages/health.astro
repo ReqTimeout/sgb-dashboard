@@ -4,6 +4,7 @@ import StatCard from "../components/StatCard.astro";
 import { getRequestTenant, latestMetric } from "../lib/data";
 import { fmtInt } from "../lib/insights";
 import { getDb } from "../lib/db";
+import { fetchEmailHealth } from "../lib/admin-crons";
 import { auditLog } from "../../drizzle/schema";
 import { desc } from "drizzle-orm";
 
@@ -37,6 +38,17 @@ try {
   }
 } catch { /* admin down — pakai daftar statis */ }
 const liveMap = new Map(liveCrons.map((c) => [c.name, c]));
+
+// Status pengiriman email (audit 24 Okt 2026): laporan harian + alert anomali
+// sempat gagal terkirim 3+ hari karena Hostinger menolak alamat From, padahal
+// cron tetap tercatat "OK". Di sini akar masalahnya ditampilkan + ada tombol
+// tes kirim supaya bisa diverifikasi setelah diperbaiki.
+const emailHealth = await fetchEmailHealth();
+const reportCron = liveMap.get("daily-report");
+const reportSummary = (reportCron?.summary ?? {}) as { emailed?: { ok?: boolean; error?: string } };
+const reportEmailOk = reportSummary.emailed?.ok === true;
+const reportEmailErr = reportSummary.emailed?.error ?? null;
+const emailOk = emailHealth ? emailHealth.candidates.some((c) => c.authOk) && reportEmailOk : false;
 
 const crons = [
   { name: "publish-articles", time: "06:00", role: "terbit" },
@@ -110,6 +122,82 @@ const roleColor: Record<string, string> = {
       })}
     </ul>
     <p class="border-t border-[color:var(--border-subtle)] px-5 py-3 text-[11px] text-[color:var(--text-faint)]">Status diambil live dari admin tiap buka halaman. Detail penuh di admin Sari Glass Bangunan (<code class="rounded bg-[color:var(--bg-surface-2)] px-1">cron_runs</code>).</p>
+  </div>
+
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">
+        Pengiriman email
+        <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">laporan pagi + alert anomali</span>
+      </h2>
+      <span class:list={["chip text-[10px]", emailOk ? "chip-success" : "chip-danger"]}>
+        {emailOk ? "kirim working" : "kirim bermasalah"}
+      </span>
+    </div>
+    <div class="px-5 py-3">
+      {!emailHealth ? (
+        <p class="text-sm text-[color:var(--text-faint)]">Diagnosa email tidak bisa diambil dari admin — endpoint /api/audit/email belum hidup.</p>
+      ) : (
+        <>
+          <div class="grid gap-2 text-[11px] sm:grid-cols-3">
+            <div class="rounded-lg bg-[color:var(--bg-surface-2)]/60 px-3 py-2">
+              <div class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Server</div>
+              <div class="font-[family-name:var(--font-mono-num)] font-semibold">{emailHealth.host}:{emailHealth.port}</div>
+            </div>
+            <div class="rounded-lg bg-[color:var(--bg-surface-2)]/60 px-3 py-2">
+              <div class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Penerima</div>
+              <div class="truncate font-semibold">{emailHealth.recipients}</div>
+            </div>
+            <div class="rounded-lg bg-[color:var(--bg-surface-2)]/60 px-3 py-2">
+              <div class="text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Laporan terakhir</div>
+              <div class="font-semibold">{reportEmailOk ? "terkirim" : "GAGAL terkirim"}</div>
+            </div>
+          </div>
+
+          <ul class="mt-2 space-y-1.5">
+            {emailHealth.candidates.map((c) => (
+              <li class="flex items-start gap-2 rounded-lg border border-[color:var(--border-subtle)] px-3 py-2 text-[11px]">
+                <span class="mt-0.5 h-2 w-2 shrink-0 rounded-full" style={`background:${c.authOk ? "var(--success)" : "var(--danger)"}`}></span>
+                <span class="min-w-0 flex-1">
+                  <span class="font-[family-name:var(--font-mono-num)] font-semibold">{c.from}</span>
+                  <span class="ml-2 text-[color:var(--text-muted)]">{c.authOk ? "AUTH ok" : "AUTH gagal"}</span>
+                  {c.error && !c.authOk && <span class="mt-0.5 block font-mono text-[10px] text-[color:var(--danger)]">{c.error.slice(0, 200)}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {reportEmailErr && (
+            <p class="mt-2 rounded-lg bg-[color:var(--danger-soft)] px-3 py-2 font-mono text-[10px] text-[color:var(--danger)]">
+              {reportEmailErr.slice(0, 300)}
+            </p>
+          )}
+
+          {Astro.url.searchParams.get("email_test") && (
+            <p
+              class="mt-2 rounded-lg px-3 py-2 text-[11px]"
+              style={Astro.url.searchParams.get("email_test") === "ok"
+                ? "background: var(--success-soft); color: var(--success);"
+                : "background: var(--danger-soft); color: var(--danger);"}
+            >
+              {Astro.url.searchParams.get("email_test") === "ok" ? "Tes kirim BERHASIL" : "Tes kirim GAGAL"} ·{" "}
+              {Astro.url.searchParams.get("email_msg") ?? ""}
+            </p>
+          )}
+          <form method="post" action="/api/health/email-test" class="mt-3 flex flex-wrap items-end gap-2">
+            <label class="flex-1">
+              <span class="mb-1 block text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Tes kirim ke (opsional)</span>
+              <input name="to" type="email" placeholder="penerima@contoh.com" class="w-full !py-1.5 text-xs" />
+            </label>
+            <button type="submit" class="btn btn-primary !py-1.5 text-xs">Tes kirim email</button>
+          </form>
+          <p class="mt-1 text-[10px] text-[color:var(--text-faint)]">
+            Kalau "AUTH ok" tapi laporan tetap gagal, server SMTP menolak alamat From. Perbaiki mailbox di hPanel
+            (Email Accounts) atau set REPORT_FROM ke mailbox yang benar-benar ada.
+          </p>
+        </>
+      )}
+    </div>
   </div>
 
   <div class="card mt-4 overflow-hidden">
