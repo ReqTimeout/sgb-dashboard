@@ -6,6 +6,7 @@ import LineChartLC from "../components/LineChartLC.svelte";
 import EmptyState from "../components/EmptyState.astro";
 import Icon from "../components/Icon.astro";
 import { getRequestTenant } from "../lib/data";
+import { BENCHMARK_CPA_CHAT_RP } from "../lib/constants";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
@@ -145,7 +146,7 @@ const lastDate = cur.length > 0 ? cur[cur.length - 1].date : "—";
         <StatCard label="Spend 30 hari" value={fmtRp(t.spend)} delta={pct(t.spend, p.spend)} deltaLabel="vs 30h lalu" spark={spendSeries.slice(-14).map((s) => s.value)} source="Meta Graph Insights level=ad · owner BOS (bukan INTERAKSI%) · producer harian" />
         <StatCard label="Chat WA masuk" value={fmtInt(t.chat)} delta={pct(t.chat, p.chat)} deltaLabel="vs 30h lalu" ok={t.chat > 0} source="messaging_conversation_started_7d per iklan" />
         <StatCard label="Lead pixel" value={fmtInt(t.lead)} hint="fb_pixel_lead · jalur website" source="offsite_conversion.fb_pixel_lead per iklan" />
-        <StatCard label="Rp/chat" value={t.chat ? fmtRp(rpc) : "—"} hint={`CTR ${ctr.toFixed(2)}% · CPC ${fmtRp(cpc)}`} warn={t.chat > 0 && rpc > 15000} ok={t.chat > 0 && rpc <= 15000} source="Spend ÷ chat · benchmark CTWA ≤ Rp15rb" />
+        <StatCard label="Rp/chat" value={t.chat ? fmtRp(rpc) : "—"} hint={`CTR ${ctr.toFixed(2)}% · CPC ${fmtRp(cpc)}`} warn={t.chat > 0 && rpc > BENCHMARK_CPA_CHAT_RP} ok={t.chat > 0 && rpc <= BENCHMARK_CPA_CHAT_RP} source="Spend ÷ chat · benchmark CTWA ≤ Rp15rb" />
       </div>
 
       <div class="card mt-4 p-5">

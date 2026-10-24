@@ -17,7 +17,9 @@ export async function fetchAiCronSummary(): Promise<{ llm: AiCronItem | null; ci
   const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
   const token = process.env.ADMIN_CRON_TOKEN ?? "";
   try {
-    const r = await fetch(`${adminUrl}/api/audit/crons?token=${encodeURIComponent(token)}`, {
+    // Token lewat HEADER (CWE-598) — bukan query string.
+    const r = await fetch(`${adminUrl}/api/audit/crons`, {
+      headers: { "X-Admin-Token": token },
       signal: AbortSignal.timeout(8000),
     });
     if (!r.ok) return null;

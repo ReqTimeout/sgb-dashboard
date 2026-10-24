@@ -4,6 +4,7 @@ import StatCard from "../components/StatCard.astro";
 import BarChartLC from "../components/BarChartLC.svelte";
 import InfoHint from "../components/InfoHint.astro";
 import { getRequestTenant, series, sumRange, channelStatus } from "../lib/data";
+import { CPC_META_RP } from "../lib/constants";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
@@ -60,7 +61,7 @@ const totalSpend = mSpend + gSpend;
 const totalLeads = mChats + gConv;
 const cpa = totalLeads ? Math.round(totalSpend / totalLeads) : 0;
 const roas = totalSpend > 0 && revenue > 0 ? revenue / totalSpend : 0;
-const organicValue = orgClicks * 1500;
+const organicValue = orgClicks * CPC_META_RP;
 
 const pct = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(a / b < 0.1 ? 1 : 0)}%` : "—");
 

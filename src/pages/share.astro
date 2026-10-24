@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
 import BarChartLC from "../components/BarChartLC.svelte";
 import { getRequestTenant, series, sumRange, channelStatus } from "../lib/data";
+import { CPC_META_RP } from "../lib/constants";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { getDb } from "../lib/db";
 import { sharedLinks } from "../../drizzle/schema";
@@ -72,7 +73,7 @@ const newToken = Astro.url.searchParams.get("token");
         <StatCard label="Klik Google" value={fmtInt(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0))} source={"Snapshot dari dashboard utama · klik ke halaman asli via token • diperbarui tiap halaman dashboard dibuka"} />
         <StatCard label="Belanja iklan" value={fmtRp(mSpend + gSpend)} source={`${adsLabel} spend 30 hari · campaign ACTIVE only`} />
         <StatCard label="Lead / konversi" value={fmtInt(mChats + gConv)} ok={mChats + gConv > 0} source={gStatus.hasRows ? "chat_started Meta + Google Ads conversions 30 hari" : "chat_started Meta 30 hari"} />
-        <StatCard label="Nilai SEO" value={fmtRp(orgClicks * 1500)} hint="estimasi" ok={orgClicks > 0} source={"Estimasi kasar: klik organik × Rp1.500 (setara CPC Meta minimum)"} />
+        <StatCard label="Nilai SEO" value={fmtRp(orgClicks * CPC_META_RP)} hint="estimasi" ok={orgClicks > 0} source={"Estimasi kasar: klik organik × Rp1.500 (konstanta CPC_META_RP — sama dengan /iklan, /seo, /roi)"} />
       </div>
       <div class="mt-3">
         <BarChartLC data={spendDaily.slice(-14).map((p) => ({ label: p.date.slice(5), value: Math.round(p.value) }))} height={160} barClass="fill-[#0081fb]" client:visible />

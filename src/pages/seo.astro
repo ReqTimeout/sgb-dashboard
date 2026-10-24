@@ -7,6 +7,7 @@ import Icon from "../components/Icon.astro";
 import InfoHint from "../components/InfoHint.astro";
 import EmptyState from "../components/EmptyState.astro";
 import { getRequestTenant, latestRanks, series, sumRange, channelStatus } from "../lib/data";
+import { CPC_META_RP } from "../lib/constants";
 import { fmtInt, fmtNum, fmtPct, fmtRp } from "../lib/insights";
 
 const user = Astro.locals.user!;
@@ -49,7 +50,7 @@ let gbp: { connected: boolean; name?: string; total?: number; avg?: number; unan
 try {
   const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
   const adminToken = process.env.ADMIN_CRON_TOKEN ?? "";
-  const r = await fetch(`${adminUrl}/api/audit/crons?token=${encodeURIComponent(adminToken)}`);
+  const r = await fetch(`${adminUrl}/api/audit/crons`, { headers: { "X-Admin-Token": adminToken } });
   if (r.ok) {
     const j = await r.json();
     const g = (j.crons ?? []).find((c: { name: string }) => c.name === "gbp-reviews");
@@ -80,7 +81,7 @@ const heroNarative = totClicks > 0
       <div class="grid gap-2 sm:gap-3">
         <div class="rounded-xl border border-white/15 px-4 py-3">
           <div class="text-[10px] text-white/55 uppercase tracking-[0.12em]">Nilai klik organik 90h</div>
-          <div class="font-[family-name:var(--font-display)] text-2xl font-extrabold text-[#34d399]">{fmtRp(totClicks * 1500)}</div>
+          <div class="font-[family-name:var(--font-display)] text-2xl font-extrabold text-[#34d399]">{fmtRp(totClicks * CPC_META_RP)}</div>
           <div class="text-[10px] text-white/55">estimasi budget Meta kalau beli klik sebanyak ini</div>
         </div>
       </div>

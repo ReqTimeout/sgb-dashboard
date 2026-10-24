@@ -24,8 +24,11 @@ export const GET: APIRoute = async ({ url, locals }) => {
   const tenant = await getRequestTenant(url.host, "/iklan", new URLSearchParams(), me.role === "superadmin");
   if (!tenant) return new Response("Tenant tidak ditemukan", { status: 404 });
   const dashUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
-  const token = process.env.SGB_INGEST_KEY ?? "";
-  const a = await fetch(`${dashUrl}/api/audit/crons?token=${token}`).then((r) => r.json()).catch(() => ({}));
+  // BUG (24 Okt 2026): pakai SGB_INGEST_KEY, sedangkan /api/audit/crons
+  // diotorisasi dengan CRON_TOKEN → 401 → rekomendasi rotasi kreatif kosong.
+  const token = process.env.ADMIN_CRON_TOKEN ?? "";
+  const a = await fetch(`${dashUrl}/api/audit/crons`, { headers: { "X-Admin-Token": token } })
+    .then((r) => r.json()).catch(() => ({}));
   const fatigue = ((a.crons ?? []).find((c: { name: string; summary?: { tired?: unknown } }) => c.name === "creative-fatigue")?.summary?.tired ?? []) as { id: string; name: string; reason: string; spend: number }[];
   const recs: RecItem[] = fatigue.slice(0, 10).map((f) => ({
     type: "rotate_creative",

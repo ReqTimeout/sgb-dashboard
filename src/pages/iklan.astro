@@ -9,6 +9,7 @@ import InfoHint from "../components/InfoHint.astro";
 import UtmCopy from "../components/UtmCopy.svelte";
 import PauseAdModal from "../components/PauseAdModal.svelte";
 import { getRequestTenant, series, sumRange, channelStatus } from "../lib/data";
+import { CPC_META_RP, BENCHMARK_CPA_CHAT_RP } from "../lib/constants";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { scoreLead } from "../lib/ai/lead-score";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
@@ -124,8 +125,11 @@ const hasMetaToken = Boolean(process.env.META_TOKEN);
 let creativeTired: { id: string; name: string; reason: string; spend: number; freq: number }[] = [];
 try {
   const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
-  const adminToken = process.env.SGB_INGEST_KEY ?? "";
-  const r = await fetch(`${adminUrl}/api/audit/crons?token=${encodeURIComponent(adminToken)}`);
+  // BUG (24 Okt 2026): token yang dipakai SGB_INGEST_KEY, padahal endpoint
+  // /api/audit/crons diotorisasi dengan CRON_TOKEN → selalu 401 → panel
+  // "kreatif lelah" SELALU kosong. Sekarang token yang benar + lewat header.
+  const adminToken = process.env.ADMIN_CRON_TOKEN ?? "";
+  const r = await fetch(`${adminUrl}/api/audit/crons`, { headers: { "X-Admin-Token": adminToken } });
   if (r.ok) {
     const j = await r.json();
     const fatigueCron = (j.crons ?? []).find((c: { name: string }) => c.name === "creative-fatigue");
@@ -141,7 +145,7 @@ let auditError: string | null = null;
 try {
   const adminUrl = (process.env.ADMIN_URL ?? "https://admin.sariglassbangunan.com").replace(/\/$/, "");
   const adminToken = process.env.ADMIN_CRON_TOKEN ?? "";
-  const r = await fetch(`${adminUrl}/api/audit/meta?token=${encodeURIComponent(adminToken)}`);
+  const r = await fetch(`${adminUrl}/api/audit/meta`, { headers: { "X-Admin-Token": adminToken } });
   if (r.ok) {
     const j = await r.json();
     summary = { active: j.active, paused: j.paused, fetched_at: j.fetched_at };
@@ -190,7 +194,7 @@ try {
     <StatCard label="Spend 30 hari (AKTIF)" value={fmtRp(mSpend)} hint="campaign berjalan saja · GSC 05:30" spark={spend.slice(-14).map((p) => p.value)} source={"Meta Graph API insights · campaign status ACTIVE · push 05:30 WIB"} />
     <StatCard label="Chat WA masuk" value={fmtInt(mChats)} hint="mulai percakapan · Meta Insight CTWA" spark={chatStarted.slice(-14).map((p) => p.value)} ok={mChats > 0} source={"chat_started Meta CTWA — lead yang klik tombol WA dari iklan (langsung ke WA, tidak lewat situs)"} />
     <StatCard label="Chat dibalas" value={fmtInt(mReplied)} hint="customer benar-benar bales · Meta Insight" ok={mReplied > 0} source={"chat_replied Meta — dari semua chat yang masuk, berapa yang customer bales balik (CS side, dashboard meta)"} />
-    <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"} · benchmark CTWA ≤ Rp15rb`} warn={mChats > 0 && cpaChat > 15000} ok={mChats > 0 && cpaChat <= 15000} source={"Spend ÷ chat · CPA per bales = spend ÷ reply (jarang < Rp100rb) · benchmark CTWA Indonesia Rp2-15rb/chat"} />
+    <StatCard label="CPA per chat" value={mChats ? fmtRp(cpaChat) : "—"} hint={`CPA per bales ${mReplied ? fmtRp(cpaReply) : "—"} · benchmark CTWA ≤ Rp15rb`} warn={mChats > 0 && cpaChat > BENCHMARK_CPA_CHAT_RP} ok={mChats > 0 && cpaChat <= BENCHMARK_CPA_CHAT_RP} source={"Spend ÷ chat · CPA per bales = spend ÷ reply (jarang < Rp100rb) · benchmark CTWA Indonesia Rp2-15rb/chat"} />
   </div>
 
   {promosActive.length > 0 && (
@@ -245,17 +249,17 @@ try {
           <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--success)]">Organik (SEO)</div>
           <div class="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtInt(oClicks)} klik</div>
           <div class="mt-1 text-xs text-[color:var(--text-muted)]">Biaya: <strong>Rp0</strong> · CPC: <strong>Rp0</strong></div>
-          <div class="mt-1 text-xs text-[color:var(--text-success)]">Seandainya beli klik sebanyak ini via Meta: {fmtRp(oClicks * 1500)}</div>
+          <div class="mt-1 text-xs text-[color:var(--text-success)]">Seandainya beli klik sebanyak ini via Meta: {fmtRp(oClicks * CPC_META_RP)}</div>
         </div>
         <div class="rounded-lg border border-[#0081fb]/30 p-4" style="background: rgb(0 129 251 / 0.06);">
           <div class="text-[10px] font-semibold uppercase tracking-[0.12em]" style="color:#0081fb">Berbayar (Meta)</div>
           <div class="mt-1 font-[family-name:var(--font-display)] text-3xl font-extrabold">{fmtInt(mClicks)} klik</div>
           <div class="mt-1 text-xs text-[color:var(--text-muted)]">Biaya: <strong>{fmtRp(mSpend)}</strong> · CPC: <strong>{fmtRp(cpc)}</strong></div>
-          <div class="mt-1 text-xs font-semibold" style={`color:${mChats > 0 && cpaChat <= 15000 ? "var(--c-good)" : "var(--c-bad)"}`}>CPA per chat: {mChats ? fmtRp(cpaChat) : "—"}</div>
+          <div class="mt-1 text-xs font-semibold" style={`color:${mChats > 0 && cpaChat <= BENCHMARK_CPA_CHAT_RP ? "var(--c-good)" : "var(--c-bad)"}`}>CPA per chat: {mChats ? fmtRp(cpaChat) : "—"}</div>
         </div>
       </div>
       <p class="mt-3 text-sm text-[color:var(--text-secondary)]">
-        <strong>Kesimpulan:</strong> mesin SEO menghasilkan {fmtInt(oClicks)} klik gratis bulan ini. Berharga {fmtRp(oClicks * 1500)} kalau harus bayar. SEO + iklan saling melengkapi: SEO untuk jangka panjang, iklan untuk chat cepat.
+        <strong>Kesimpulan:</strong> mesin SEO menghasilkan {fmtInt(oClicks)} klik gratis bulan ini. Berharga {fmtRp(oClicks * CPC_META_RP)} kalau harus bayar. SEO + iklan saling melengkapi: SEO untuk jangka panjang, iklan untuk chat cepat.
       </p>
     </div>
   )}
@@ -375,7 +379,7 @@ try {
               const cpcC = c.clicks > 0 ? Math.round(c.spend / c.clicks) : 0;
               const rec = cpa === 0 ? { cls: "chip", label: "Belum ada chat" }
                 : cpa < 8000 ? { cls: "chip chip-success", label: "Sehat" }
-                : cpa < 15000 ? { cls: "chip chip-warning", label: "Pantau" }
+                : cpa < BENCHMARK_CPA_CHAT_RP ? { cls: "chip chip-warning", label: "Pantau" }
                 : { cls: "chip chip-danger", label: "Mahal — review" };
               return (
                 <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
