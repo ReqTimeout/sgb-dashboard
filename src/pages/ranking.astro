@@ -1,145 +1,461 @@
 ---
 import Base from "../layouts/Base.astro";
 import StatCard from "../components/StatCard.astro";
-import { getRequestTenant, latestRanks, rankHistory } from "../lib/data";
-import { fmtInt, insightPosition } from "../lib/insights";
+import InfoHint from "../components/InfoHint.astro";
+import EmptyState from "../components/EmptyState.astro";
+import BarChartLC from "../components/BarChartLC.svelte";
+import { getRequestTenant, rankWindow } from "../lib/data";
+import { fmtInt, fmtPct } from "../lib/insights";
 import { getDb } from "../lib/db";
 import { keywordInventory, articlesView } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
+import {
+  buildKeywordMatcher,
+  calcGscOpportunity,
+  positionZone,
+  ZONE_LABEL,
+  ZONE_ORDER,
+  normText,
+} from "../lib/keywords/match";
+import { CLUSTERS } from "../lib/keywords/enrich";
 
 const user = Astro.locals.user!;
 const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.url.searchParams, user.role === "superadmin");
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 
 const db = getDb();
-// Relasi keyword target → artikel: hanya yang SUDAH PUBLISH yang masuk ranking.
-// published = status inventory terbit/ter-commit/diajukan ATAU artikel berstatus published.
-const PUBLISHED_INV = new Set(["terbit", "ter-commit", "diajukan"]);
+
+// ── Data inventory (target keyword kita) ──────────────────────────────────
 const invRows = await db
-  .select({ keyword: keywordInventory.keyword, status: keywordInventory.status, articleSlug: keywordInventory.articleSlug })
+  .select({
+    keyword: keywordInventory.keyword,
+    status: keywordInventory.status,
+    articleSlug: keywordInventory.articleSlug,
+    cluster: keywordInventory.cluster,
+    city: keywordInventory.city,
+    intent: keywordInventory.intent,
+    priority: keywordInventory.priority,
+    suggestion: keywordInventory.suggestion,
+    opportunity: keywordInventory.opportunity,
+  })
   .from(keywordInventory)
   .where(eq(keywordInventory.tenantId, tenant.id));
-const normKw = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
-const invByKw = new Map(invRows.map((r) => [r.keyword, r]));
-const invByNorm = new Map(invRows.map((r) => [normKw(r.keyword), r]));
+
+// ── Data artikel published ────────────────────────────────────────────────
 const artRows = await db
   .select({ slug: articlesView.slug, title: articlesView.title, status: articlesView.status })
   .from(articlesView)
   .where(eq(articlesView.tenantId, tenant.id));
 const artBySlug = new Map(artRows.map((a) => [a.slug, a]));
-const publishedCount = invRows.filter((r) => PUBLISHED_INV.has(r.status)).length;
 
-// Slug dari ranking pageUrl (/blog/{slug}/) — fallback bila keyword tak ada di inventory.
-function slugFromUrl(url: string | null): string | null {
-  if (!url) return null;
-  const m = url.match(/\/blog\/([a-z0-9-]+)\/?/i);
-  return m ? m[1].toLowerCase() : null;
+// ── Snapshot ranking (semua query GSC, bukan cuma top-25) ─────────────────
+const snaps = await rankWindow(tenant.id, 8);
+const dates = [...new Set(snaps.map((s) => s.date))].sort().reverse();
+const latestDate = dates[0] ?? null;
+const prevDate = dates.find((d) => d !== latestDate) ?? null;
+
+// Posisi per keyword pada tanggal terbaru & 7 hari lalu (semua di memory).
+const posByKw = new Map<string, number>();
+const posByKwPrev = new Map<string, number>();
+for (const s of snaps) {
+  if (s.position == null) continue;
+  if (s.date === latestDate) {
+    const cur = posByKw.get(s.keyword);
+    if (cur == null || s.position < cur) posByKw.set(s.keyword, s.position);
+  } else if (prevDate && s.date === prevDate) {
+    const cur = posByKwPrev.get(s.keyword);
+    if (cur == null || s.position < cur) posByKwPrev.set(s.keyword, s.position);
+  }
 }
 
-const ranks = (await latestRanks(tenant.id, 50)).filter((r) => !r.keyword.startsWith("page:")).slice(0, 20);
-const movers: { keyword: string; now: number | null; prev: number | null; move: number | null; clicks: number | null; slug: string | null; articleTitle: string | null }[] = [];
-for (const r of ranks) {
-  const inv = invByKw.get(r.keyword) ?? invByNorm.get(normKw(r.keyword));
-  let slug = inv?.articleSlug ?? null;
-  if (!slug) slug = slugFromUrl(r.pageUrl);
-  const art = slug ? artBySlug.get(slug) : undefined;
-  const isPublished = (inv != null && PUBLISHED_INV.has(inv.status)) || art?.status === "published";
-  if (!isPublished) continue; // belum publish → tidak masuk ranking
-  const hist = await rankHistory(tenant.id, r.keyword, 10);
-  const prev = hist.length > 1 ? hist[0].value : null;
-  movers.push({
-    keyword: r.keyword,
-    now: r.position,
-    prev,
-    move: r.position != null && prev != null ? prev - r.position : null,
-    clicks: r.clicks,
-    slug,
-    articleTitle: art?.title ?? null,
+// Baris ranking untuk tanggal terbaru (gabung metrik GSC).
+interface RankRow {
+  keyword: string;
+  position: number | null;
+  impressions: number;
+  clicks: number;
+  pageUrl: string | null;
+  move: number | null;
+}
+const latestRows: RankRow[] = [];
+for (const s of snaps) {
+  if (s.date !== latestDate) continue;
+  if (s.keyword.startsWith("page:")) continue;
+  const now = posByKw.get(s.keyword) ?? null;
+  const prev = posByKwPrev.get(s.keyword) ?? null;
+  latestRows.push({
+    keyword: s.keyword,
+    position: now,
+    impressions: s.impressions ?? 0,
+    clicks: s.clicks ?? 0,
+    pageUrl: s.pageUrl,
+    move: now != null && prev != null ? prev - now : null,
   });
 }
-movers.sort((a, b) => (b.move ?? -999) - (a.move ?? -999));
-// Semua statistik dari movers (yang sudah publish saja) — konsisten dengan tabel.
-const withPos = movers.filter((m) => m.now != null);
-const avg = withPos.length ? withPos.reduce((a, r) => a + (r.now ?? 0), 0) / withPos.length : null;
-const top3 = movers.filter((m) => m.now != null && m.now <= 3).length;
-const top10 = movers.filter((m) => m.now != null && m.now <= 10).length;
-const up7 = movers.filter((m) => (m.move ?? 0) > 0).length;
 
-function badge(pos: number | null): string {
-  if (pos == null) return `<span class="chip">—</span>`;
-  if (pos <= 3) return `<span class="chip chip-warning">TOP ${pos}</span>`;
-  if (pos <= 10) return `<span class="chip chip-success">Hal. 1 · ${pos}</span>`;
-  return `<span class="chip">Hal. 2+ · ${pos}</span>`;
+// ── Matcher query GSC ↔ keyword inventory ─────────────────────────────────
+const matcher = buildKeywordMatcher(
+  invRows.map((r) => ({
+    keyword: r.keyword,
+    normalizedKeyword: null,
+    priority: r.priority,
+    status: r.status,
+    articleSlug: r.articleSlug,
+    cluster: r.cluster,
+    city: r.city,
+    intent: r.intent,
+    suggestion: r.suggestion,
+    opportunity: r.opportunity,
+  })),
+);
+const invByKeyword = new Map(invRows.map((r) => [normText(r.keyword), r]));
+
+interface BoardRow {
+  query: string;
+  position: number | null;
+  impressions: number;
+  clicks: number;
+  move: number | null;
+  zone: ReturnType<typeof positionZone>;
+  opportunity: number;
+  target: { keyword: string; status: string; articleSlug: string | null; cluster: string | null; city: string | null; intent: string | null; suggestion: string | null; priority: number } | null;
+  articleTitle: string | null;
+  articleStatus: string | null;
+  isGap: boolean;
 }
+
+const board: BoardRow[] = latestRows.map((r) => {
+  const m = matcher(r.keyword);
+  const inv = m ? invByKeyword.get(normText(m.keyword)) ?? null : null;
+  const slug = inv?.articleSlug ?? (r.pageUrl ? (r.pageUrl.match(/\/blog\/([a-z0-9-]+)\/?/i)?.[1] ?? null) : null);
+  const art = slug ? artBySlug.get(slug) : undefined;
+  const opportunity = calcGscOpportunity({
+    impressions: r.impressions,
+    position: r.position,
+    clicks: r.clicks,
+    priority: inv?.priority ?? 50,
+    intent: inv?.intent ?? null,
+  });
+  return {
+    query: r.keyword,
+    position: r.position,
+    impressions: r.impressions,
+    clicks: r.clicks,
+    move: r.move,
+    zone: positionZone(r.position),
+    opportunity,
+    target: inv
+      ? {
+          keyword: inv.keyword,
+          status: inv.status,
+          articleSlug: inv.articleSlug,
+          cluster: inv.cluster,
+          city: inv.city,
+          intent: inv.intent,
+          suggestion: inv.suggestion,
+          priority: inv.priority,
+        }
+      : null,
+    articleTitle: art?.title ?? null,
+    articleStatus: art?.status ?? null,
+    isGap: !inv,
+  };
+});
+
+// ── Agregat & sebaran posisi ──────────────────────────────────────────────
+const tracked = board.length;
+const withPos = board.filter((b) => b.position != null);
+const zoneCount = Object.fromEntries(ZONE_ORDER.map((z) => [z, board.filter((b) => b.zone === z).length])) as Record<
+  (typeof ZONE_ORDER)[number],
+  number
+>;
+const top3 = zoneCount.top3;
+const page1 = zoneCount.top3 + zoneCount.page1;
+// Rata-rata posisi DIBOBOT impressions — keyword dengan 800 tayang lebih
+//represents daripada keyword 1 tayang. Bobot tak berbobot bikin "rata-rata
+// posisi 3,0" padahal 280 keyword Majority di posisi 9.
+const wSum = withPos.reduce((a, b) => a + (b.impressions || 0), 0);
+const avgPos = wSum > 0 ? withPos.reduce((a, b) => a + (b.position ?? 0) * (b.impressions || 0), 0) / wSum : null;
+const totalImpr = board.reduce((a, b) => a + b.impressions, 0);
+const totalClicks = board.reduce((a, b) => a + b.clicks, 0);
+const ctr = totalImpr > 0 ? totalClicks / totalImpr : null;
+
+// Celah konten: query GSC bermuatan tinggi yang BELUM punya target keyword.
+const gaps = board.filter((b) => b.isGap && b.impressions > 0).sort((a, b) => b.impressions - a.impressions);
+const gapImpr = gaps.reduce((a, b) => a + b.impressions, 0);
+
+// ── Filter & sorting ──────────────────────────────────────────────────────
+const zoneParam = Astro.url.searchParams.get("zone") ?? "all";
+const qParam = (Astro.url.searchParams.get("q") ?? "").trim().toLowerCase();
+const sortParam = Astro.url.searchParams.get("sort") ?? "peluang";
+
+function linkBase(overrides: Record<string, string | null>): string {
+  const p = new URLSearchParams();
+  if (zoneParam !== "all") p.set("zone", zoneParam);
+  if (qParam) p.set("q", qParam);
+  if (sortParam !== "peluang") p.set("sort", sortParam);
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === null) p.delete(k);
+    else p.set(k, v);
+  }
+  const qs = p.toString();
+  return `/ranking${qs ? "?" + qs : ""}`;
+}
+
+let filtered = board;
+if (zoneParam === "page1") filtered = board.filter((b) => b.zone === "top3" || b.zone === "page1");
+else if (zoneParam === "top3") filtered = board.filter((b) => b.zone === "top3");
+else if (zoneParam === "sweet") filtered = board.filter((b) => b.zone === "page1");
+else if (zoneParam === "gap") filtered = board.filter((b) => b.isGap);
+else if (zoneParam === "covered") filtered = board.filter((b) => !b.isGap);
+if (qParam) {
+  filtered = filtered.filter(
+    (b) =>
+      b.query.toLowerCase().includes(qParam) ||
+      (b.target?.keyword ?? "").toLowerCase().includes(qParam) ||
+      (b.target?.city ?? "").toLowerCase().includes(qParam),
+  );
+}
+const SORTERS: Record<string, (a: BoardRow, b: BoardRow) => number> = {
+  peluang: (a, b) => b.opportunity - a.opportunity,
+  tayang: (a, b) => b.impressions - a.impressions,
+  posisi: (a, b) => (a.position ?? 999) - (b.position ?? 999),
+  delta: (a, b) => (b.move ?? -999) - (a.move ?? -999),
+};
+const sorter = SORTERS[sortParam] ?? SORTERS.peluang;
+const boardRows = [...filtered].sort(sorter).slice(0, 50);
+
+// ── Freshness ─────────────────────────────────────────────────────────────
+const snapshotAgeH = latestDate
+  ? Math.max(0, Math.round((Date.now() - new Date(`${latestDate}T00:00:00Z`).getTime()) / 3600_000))
+  : null;
+const stale = snapshotAgeH == null ? true : snapshotAgeH > 36;
+const CLUSTER_LABELS: Record<string, string> = Object.fromEntries(CLUSTERS.map((c) => [c.id, c.label]));
+const TARGET_STATUS_LABEL: Record<string, string> = {
+  antre: "Antre",
+  draft: "Draft",
+  terbit: "Terbit",
+  "ter-commit": "Ter-commit",
+  diajukan: "Diajukan",
+};
 ---
 <Base title="Ranking Tracker" tenantName={tenant.name}>
   <div class="relative overflow-hidden rounded-2xl px-6 py-6 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
     <div class="hazard-stripe absolute inset-x-0 top-0"></div>
     <div class="relative z-10">
-      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Ranking Tracker — {tenant.name}</div>
-      <div class="mt-2 text-display text-2xl sm:text-3xl">
-        {insightPosition(avg)}
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Ranking Tracker — {tenant.name}</div>
+        {latestDate && (
+          <span class:list={[
+            "chip !text-[9px]",
+            stale ? "chip-warning" : "chip-success",
+          ]} title="Umur snapshot ranking. Push harian 05:00 WIB.">
+            Snapshot {latestDate} · {snapshotAgeH == null ? "—" : `${snapshotAgeH} jam lalu`}{stale ? " · BASI" : ""}
+          </span>
+        )}
       </div>
-      <p class="mt-2 max-w-xl text-sm text-white/80">
-        Hanya keyword yang artikelnya <strong>sudah publish</strong> ({publishedCount} kandidat) yang masuk sini.
-        {up7 > 0 ? ` ${up7} keyword naik minggu ini, ${movers.filter((m) => (m.move ?? 0) < 0).length} turun.` : " Belum ada pergerakan signifikan minggu ini."}
-        {" "}{top3 > 0 ? `${top3} di TOP 3 (gold tier).` : ""}
+      <div class="mt-2 text-display text-2xl sm:text-3xl">
+        {tracked > 0
+          ? `${fmtInt(tracked)} keyword terpantau · ${fmtInt(page1)} di halaman 1`
+          : "Belum ada data ranking"}
+      </div>
+      <p class="mt-2 max-w-2xl text-sm text-white/80">
+        Papan peluang di bawah memakai data riil Search Console (posisi, tayang, klik) — bukan tebakan.
+        {page1 > 0 ? ` ${fmtInt(zoneCount.page1)} keyword duduk di zona sweet spot (posisi 4-10): satu langkah naik sudah menghasilkan klik.` : ""}
+        {gaps.length > 0 ? ` ${fmtInt(gaps.length)} query bermuatan tinggi belum punya artikel — celah konten.` : ""}
       </p>
     </div>
   </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <StatCard label="Rata-rata posisi" value={avg ? avg.toFixed(1).replace(".", ",") : "—"} hint="≤10 = halaman 1 Google" source={"Rata-rata rank_snapshots.keyword agregat. Push tiap pagi 05:10 WIB."} />
-    <StatCard label="TOP 3" value={fmtInt(top3)} hint="gold tier" source={"Keyword dengan posisi ≤3 di Google. Driver utama klik organik."} />
-    <StatCard label="TOP 10" value={fmtInt(top10)} hint="page 1" source={"Keyword di posisi 4-10 (= halaman 1 Google). Sweet spot untuk didorong naik ke TOP 3."} />
-    <StatCard label="Naik 7 hari" value={fmtInt(up7)} delta={up7 - movers.filter((m) => (m.move ?? 0) < 0).length} hint={up7 > movers.filter((m) => (m.move ?? 0) < 0).length ? "netral ke atas" : "netral ke bawah"} source={"Δ posisi ranking vs 7 hari lalu. Naik = makin page-one; turun = turun halaman."} />
+    <StatCard label="Keyword terpantau" value={fmtInt(tracked)} hint="query riil dari GSC" source={"Jumlah query yang punya tayang >0 dalam snapshot Search Console 30 hari. Diperbarui harian 05:00 WIB."} />
+    <StatCard label="Halaman 1" value={fmtInt(page1)} hint="posisi ≤10" source={"Keyword yang sudah tampil di halaman pertama Google. Di sinilah effort SEO paling balik."} />
+    <StatCard label="TOP 3" value={fmtInt(top3)} hint="gold tier" source={"Keyword di posisi 1-3 — driver utama klik organik."} />
+    <StatCard label="Rata-rata posisi" value={avgPos ? avgPos.toFixed(1).replace(".", ",") : "—"} hint="dibobot tayang" source={"Rata-rata posisi dibobot jumlah tayang, supaya keyword 800 tayang tidak disamakan dengan keyword 1 tayang."} />
   </div>
 
-  <div class="mt-4 overflow-x-auto rounded-2xl border border-[color:var(--border-default)] bg-[color:var(--bg-surface)]">
-    <table class="w-full min-w-[640px] text-sm">
-      <thead>
-        <tr class="text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
-          <th class="px-5 py-3">Keyword → Artikel</th>
-          <th class="px-2 py-3 text-right">Pos</th>
-          <th class="px-2 py-3 text-right">Δ 7 hari</th>
-          <th class="px-2 py-3 text-right">Klik</th>
-          <th class="px-5 py-3">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-      {movers.length === 0 && (
-        <tr><td colspan="5" class="px-4 py-10 text-center text-[color:var(--text-faint)]">Belum ada keyword publish yang ter-track — publish artikel dulu di /keywords (strip "Next up"), ranking muncul setelah GSC push 05:00 WIB.</td></tr>
+  <div class="mt-4 grid gap-3 lg:grid-cols-[1.35fr_1fr]">
+    <!-- SEBARAN POSISI -->
+    <div class="card p-4">
+      <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Sebaran posisi</div>
+        <span class="text-[10px] text-[color:var(--text-faint)]">{fmtInt(totalImpr)} tayang · {fmtInt(totalClicks)} klik{ctr != null ? ` · CTR ${fmtPct(ctr)}` : ""}</span>
+      </div>
+      {tracked > 0 ? (
+        <BarChartLC
+          data={ZONE_ORDER.map((z) => ({ label: ZONE_LABEL[z], value: zoneCount[z] }))}
+          height={210}
+          barClass="fill-[#FACC15]"
+          client:visible
+        />
+      ) : (
+        <p class="py-10 text-center text-xs text-[color:var(--text-faint)]">Belum ada data posisi.</p>
       )}
-      {movers.map((m) => (
-        <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
-          <td class="px-5 py-3">
-            <div class="font-medium">{m.keyword}</div>
-            {m.slug ? (
-              <a href={`https://sariglassbangunan.com/blog/${m.slug}/`} target="_blank" rel="noopener" class="mt-0.5 block max-w-[280px] truncate text-[11px] text-[color:var(--info)] hover:underline" title={m.articleTitle ?? m.slug}>
-                {m.articleTitle ?? m.slug} ↗
-              </a>
-            ) : (
-              <div class="mt-0.5 text-[11px] text-[color:var(--text-faint)]">artikel publish (slug menyusul)</div>
-            )}
-          </td>
-            <td class="px-2 py-3 text-right">
-              <span class:list={["font-[family-name:var(--font-mono-num)] text-lg font-extrabold", m.now != null && m.now <= 3 ? "text-[color:var(--brand)]" : ""]}>{m.now ?? "—"}</span>
-            </td>
-            <td class="px-2 py-3 text-right font-[family-name:var(--font-mono-num)] font-semibold">
-              {m.move == null ? <span class="text-[color:var(--text-faint)]">—</span>
-                : m.move > 0 ? <span class="chip chip-success">▲ {m.move}</span>
-                : m.move < 0 ? <span class="chip chip-danger">▼ {Math.abs(m.move)}</span>
-                : <span class="text-[color:var(--text-faint)]">▬</span>}
-            </td>
-            <td class="px-2 py-3 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(m.clicks)}</td>
-            <td class="px-5 py-3"><Fragment set:html={badge(m.now)} /></td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+      <p class="mt-2 text-[10px] text-[color:var(--text-faint)]">
+        Zona sweet spot = posisi 4-10. Di zona ini satu langkah naik ke atas menghasilkan klik jauh lebih banyak
+        daripada effort di posisi 50.
+      </p>
+    </div>
+
+    <!-- CELAH KONTEN -->
+    <div class="card p-4">
+      <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Celah konten</div>
+        <span class="text-[10px] text-[color:var(--text-faint)]">{fmtInt(gaps.length)} query · {fmtInt(gapImpr)} tayang/bulan</span>
+      </div>
+      {gaps.length > 0 ? (
+        <>
+          <p class="mb-2 text-xs text-[color:var(--text-secondary)]">
+            Orang sudah mencari ini di Google, tapi kita belum punya artikel yang ditargeting — daftar artikel baru yang paling tinggi peluangnya.
+          </p>
+          <ol class="space-y-1.5">
+            {gaps.slice(0, 8).map((g) => (
+              <li class="flex items-center gap-2 text-sm">
+                <span class="min-w-0 flex-1 truncate" title={g.query}>{g.query}</span>
+                {g.position != null && <span class="shrink-0 font-[family-name:var(--font-mono-num)] text-[11px] text-[color:var(--text-muted)]">pos {g.position}</span>}
+                <span class="shrink-0 font-[family-name:var(--font-mono-num)] text-[11px] font-bold">{fmtInt(g.impressions)} tayang</span>
+              </li>
+            ))}
+          </ol>
+          <a href={linkBase({ zone: "gap" })} class="mt-3 inline-flex items-center gap-1 text-xs text-[color:var(--info)] hover:underline">
+            Lihat semua {fmtInt(gaps.length)} celah konten →
+          </a>
+        </>
+      ) : (
+        <p class="py-8 text-center text-xs text-[color:var(--text-faint)]">
+          Tidak ada celah — setiap query bermuatan tinggi sudah punya target keyword.
+        </p>
+      )}
+    </div>
   </div>
+
+  <!-- PAPAN PELUANG -->
+  <div class="mt-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">
+        Papan peluang keyword
+        <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">
+          diurut peluang — posisi, tayang, klik, dan artikel yang harus dibuat
+        </span>
+      </h2>
+      <span class="ml-auto">
+        <InfoHint source="Papan peluang dihitung dari data Search Console riil: peluang = tayang × (11 - posisi) untuk zona 4-10 (sweet spot). Keyword tanpa target artikel ditandai CELAH." variant="info" />
+      </span>
+    </div>
+
+    <div class="mt-2 flex flex-wrap items-center gap-1.5">
+      <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-faint)]">Filter</span>
+      <a href={linkBase({ zone: null })} class:list={["rounded-full px-3 py-1 text-xs transition-colors", zoneParam === "all" ? "bg-[color:var(--brand)] font-bold text-white" : "bg-[color:var(--bg-surface-2)] hover:bg-[color:var(--bg-surface)]"]}>Semua ({fmtInt(tracked)})</a>
+      <a href={linkBase({ zone: "page1" })} class:list={["rounded-full px-3 py-1 text-xs transition-colors", zoneParam === "page1" ? "bg-[color:var(--brand)] font-bold text-white" : "bg-[color:var(--bg-surface-2)] hover:bg-[color:var(--bg-surface)]"]}>Halaman 1 ({fmtInt(page1)})</a>
+      <a href={linkBase({ zone: "top3" })} class:list={["rounded-full px-3 py-1 text-xs transition-colors", zoneParam === "top3" ? "bg-[color:var(--brand)] font-bold text-white" : "bg-[color:var(--bg-surface-2)] hover:bg-[color:var(--bg-surface)]"]}>TOP 3 ({fmtInt(top3)})</a>
+      <a href={linkBase({ zone: "sweet" })} class:list={["rounded-full px-3 py-1 text-xs transition-colors", zoneParam === "sweet" ? "bg-[color:var(--brand)] font-bold text-white" : "bg-[color:var(--bg-surface-2)] hover:bg-[color:var(--bg-surface)]"]}>Sweet spot 4-10 ({fmtInt(zoneCount.page1)})</a>
+      <a href={linkBase({ zone: "gap" })} class:list={["rounded-full px-3 py-1 text-xs transition-colors", zoneParam === "gap" ? "bg-[color:var(--brand)] font-bold text-white" : "bg-[color:var(--bg-surface-2)] hover:bg-[color:var(--bg-surface)]"]}>Celah ({fmtInt(gaps.length)})</a>
+      <a href={linkBase({ zone: "covered" })} class:list={["rounded-full px-3 py-1 text-xs transition-colors", zoneParam === "covered" ? "bg-[color:var(--brand)] font-bold text-white" : "bg-[color:var(--bg-surface-2)] hover:bg-[color:var(--bg-surface)]"]}>Sudah ditarget ({fmtInt(tracked - gaps.length)})</a>
+    </div>
+
+    <form method="get" action="/ranking" class="mt-2 flex flex-wrap items-center gap-2">
+      {zoneParam !== "all" && <input type="hidden" name="zone" value={zoneParam} />}
+      <input type="search" name="q" value={qParam} placeholder="Cari keyword / kota…" class="min-w-[180px] flex-1 rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-3 py-1 text-sm" />
+      <select name="sort" class="rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-3 py-1 text-sm">
+        <option value="peluang" selected={sortParam === "peluang"}>Sort: Peluang</option>
+        <option value="tayang" selected={sortParam === "tayang"}>Sort: Tayang</option>
+        <option value="posisi" selected={sortParam === "posisi"}>Sort: Posisi</option>
+        <option value="delta" selected={sortParam === "delta"}>Sort: Δ posisi</option>
+      </select>
+      <button class="btn btn-primary !py-1 text-xs">Terapkan</button>
+    </form>
+
+    {boardRows.length === 0 ? (
+      <div class="mt-3">
+        <EmptyState
+          title={qParam || zoneParam !== "all" ? "Tidak ada hasil" : "Belum ada data ranking"}
+          message={
+            qParam || zoneParam !== "all"
+              ? "Coba filter lain atau hapus kata kunci."
+              : "Snapshot Search Console pertama akan masuk setelah push harian 05:00 WIB."
+          }
+          mascot="search"
+          when="Pipeline GSC → rank_snapshots (push harian 05:00 WIB)."
+          action="Pastikan cron push-metrics di admin hijau — cek menu Sistem."
+        />
+      </div>
+    ) : (
+      <div class="card mt-3 overflow-x-auto !p-0">
+        <table class="w-full min-w-[980px] text-sm">
+          <thead>
+            <tr class="border-b border-[color:var(--border-subtle)] text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+              <th class="px-4 py-2.5">Query (apa yang dicari)</th>
+              <th class="px-2 py-2.5 text-right">Pos</th>
+              <th class="px-2 py-2.5 text-right">Δ 7h</th>
+              <th class="px-2 py-2.5 text-right">Tayang</th>
+              <th class="px-2 py-2.5 text-right">Klik</th>
+              <th class="px-3 py-2.5">Target artikel</th>
+              <th class="px-2 py-2.5">Klaster</th>
+              <th class="px-2 py-2.5">Kota</th>
+              <th class="px-4 py-2.5 text-right">Peluang</th>
+            </tr>
+          </thead>
+          <tbody>
+            {boardRows.map((b) => (
+              <tr class="border-t border-[color:var(--border-subtle)] transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+                <td class="px-4 py-2.5">
+                  <div class="font-medium">{b.query}</div>
+                  {b.isGap ? (
+                    <span class="chip chip-warning mt-0.5 !text-[9px]">CELAH — belum ada artikel</span>
+                  ) : b.articleTitle ? (
+                    <a href={`https://sariglassbangunan.com/blog/${b.target?.articleSlug}/`} target="_blank" rel="noopener" class="mt-0.5 block max-w-[280px] truncate text-[11px] text-[color:var(--info)] hover:underline" title={b.articleTitle}>
+                      {b.articleTitle} ↗
+                    </a>
+                  ) : (
+                    <span class="mt-0.5 block text-[11px] text-[color:var(--text-faint)]">
+                      {TARGET_STATUS_LABEL[b.target?.status ?? ""] ?? b.target?.status ?? "—"}
+                    </span>
+                  )}
+                </td>
+                <td class="px-2 py-2.5 text-right">
+                  <span class:list={[
+                    "font-[family-name:var(--font-mono-num)] text-base font-extrabold",
+                    b.zone === "top3" ? "text-[color:var(--brand)]" : b.zone === "page1" ? "text-[color:var(--success)]" : "",
+                  ]}>{b.position ?? "—"}</span>
+                </td>
+                <td class="px-2 py-2.5 text-right font-[family-name:var(--font-mono-num)] font-semibold">
+                  {b.move == null ? <span class="text-[color:var(--text-faint)]">—</span>
+                    : b.move > 0 ? <span class="chip chip-success">▲ {b.move}</span>
+                    : b.move < 0 ? <span class="chip chip-danger">▼ {Math.abs(b.move)}</span>
+                    : <span class="text-[color:var(--text-faint)]">▬</span>}
+                </td>
+                <td class="px-2 py-2.5 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(b.impressions)}</td>
+                <td class="px-2 py-2.5 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(b.clicks)}</td>
+                <td class="px-3 py-2.5 text-xs">
+                  {b.target ? (
+                    <span class="block max-w-[230px] truncate" title={b.target.keyword}>{b.target.keyword}</span>
+                  ) : (
+                    <span class="text-[color:var(--text-faint)]">—</span>
+                  )}
+                  {b.target?.suggestion && <span class="mt-0.5 block max-w-[230px] truncate text-[10px] text-[color:var(--text-faint)]" title={b.target.suggestion}>{b.target.suggestion}</span>}
+                </td>
+                <td class="px-2 py-2.5 text-xs">
+                  {b.target?.cluster ? <span class="chip chip-info !text-[9px]">{CLUSTER_LABELS[b.target.cluster] ?? b.target.cluster}</span> : <span class="text-[color:var(--text-faint)]">—</span>}
+                </td>
+                <td class="px-2 py-2.5 text-xs text-[color:var(--text-muted)]">{b.target?.city ?? <span class="text-[color:var(--text-faint)]">—</span>}</td>
+                <td class="px-4 py-2.5 text-right">
+                  <div class="inline-flex items-center gap-1.5">
+                    <div class="h-1 w-14 overflow-hidden rounded-full bg-[color:var(--bg-surface-2)]">
+                      <div class="h-full rounded-full bg-[color:var(--brand)]" style={`width:${Math.min(100, Math.max(3, b.opportunity / 12))}%`}></div>
+                    </div>
+                    <span class="font-[family-name:var(--font-mono-num)] text-[11px] font-bold">{fmtInt(b.opportunity)}</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+
   <p class="mt-3 flex items-center gap-1.5 text-xs text-[color:var(--text-muted)]">
     <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/></svg>
-    Cara baca: ▲ hijau = naik peringkat (bagus). Coba Google sendiri keyword TOP 3 untuk buktikan.
+    Cara baca: ▲ hijau = naik peringkat. Peluang dihitung dari tayang × (11 − posisi) di zona 4-10 — skor tertinggi = paling layak digarap.
   </p>
 </Base>

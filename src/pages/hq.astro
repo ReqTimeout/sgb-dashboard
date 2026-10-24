@@ -1,9 +1,10 @@
 ---
 import Base from "../layouts/Base.astro";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, count, desc, eq, gte } from "drizzle-orm";
 import { getDb } from "../lib/db";
-import { dailyMetrics, leadEvents, notesInternal, tenants } from "../../drizzle/schema";
-import { fmtInt } from "../lib/insights";
+import { articlesView, dailyMetrics, leadEvents, notesInternal, tenants } from "../../drizzle/schema";
+import { fmtInt, fmtRp } from "../lib/insights";
+import { CPC_META_RP, BENCHMARK_CPA_CHAT_RP } from "../lib/constants";
 
 const user = Astro.locals.user!;
 if (user.role !== "superadmin") throw new Error("Khusus agency");
@@ -16,18 +17,94 @@ function isoAgo(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-const cards: { slug: string; name: string; clicks30: number; leads30: number }[] = [];
-for (const t of allTenants) {
-  const clicks = await db.select({ v: dailyMetrics.valueNum }).from(dailyMetrics).where(
-    and(eq(dailyMetrics.tenantId, t.id), eq(dailyMetrics.channel, "seo"), eq(dailyMetrics.metric, "clicks"), gte(dailyMetrics.date, isoAgo(30)))
-  );
-  const leads = await db.select({ id: leadEvents.id }).from(leadEvents).where(
-    and(eq(leadEvents.tenantId, t.id), gte(leadEvents.ts, new Date(isoAgo(30) + "T00:00:00Z")))
-  );
-  cards.push({ slug: t.slug, name: t.name, clicks30: Math.round(clicks.reduce((a, r) => a + (r.v ?? 0), 0)), leads30: leads.length });
+// ── Metrik per klien (upgrade 24 Okt 2026) ────────────────────────────────
+// Dulu /hq cuma 3 angka total (klik + lead) tanpa spend, tanpa artikel,
+// tanpa revenue, tanpa CPA. Untuk agency, yang dipakai = "klien ini untung
+// atau rugi, dan ke mana budgetnya wentuh". Sekarang satu baris per klien
+// memuat: traffic, spend, lead unik, CPA, nilai SEO, artikel, revenue.
+interface ClientCard {
+  slug: string;
+  name: string;
+  domain: string;
+  clicks30: number;
+  impr30: number;
+  spend30: number;
+  chats30: number;
+  leads30: number;       // klik WA (event)
+  leadsUnik30: number;   // prospek unik (distinct halaman)
+  deals30: number;
+  revenue30: number;
+  articles30: number;
+  articlesTotal: number;
+  organicValue: number;
+  cpa: number;
+  status: "sehat" | "perlu perhatian" | "belum jalan";
 }
+
+const cards: ClientCard[] = [];
+for (const t of allTenants) {
+  const since30 = isoAgo(30);
+
+  const mRows = await db
+    .select({ channel: dailyMetrics.channel, metric: dailyMetrics.metric, v: dailyMetrics.valueNum })
+    .from(dailyMetrics)
+    .where(and(eq(dailyMetrics.tenantId, t.id), gte(dailyMetrics.date, since30)));
+  const sumOf = (ch: string, me: string) =>
+    Math.round(mRows.filter((r) => r.channel === ch && r.metric === me).reduce((a, r) => a + (r.v ?? 0), 0));
+
+  const clicks30 = sumOf("seo", "clicks");
+  const impr30 = sumOf("seo", "impressions");
+  const spend30 = sumOf("meta_ads", "spend") + sumOf("google_ads", "spend");
+  const chats30 = sumOf("meta_ads", "leads");
+  const articles30 = sumOf("content", "articles_published_24h");
+
+  const lRows = await db
+    .select({ ts: leadEvents.ts, pageUrl: leadEvents.pageUrl, status: leadEvents.status, dealValue: leadEvents.dealValue })
+    .from(leadEvents)
+    .where(and(eq(leadEvents.tenantId, t.id), gte(leadEvents.ts, new Date(since30 + "T00:00:00Z"))));
+  const leads30 = lRows.length;
+  const leadsUnik30 = new Set(lRows.map((r) => (r.pageUrl ?? "").split("?")[0])).size;
+  const deals30 = lRows.filter((r) => r.status === "deal").length;
+  const revenue30 = lRows.reduce((a, r) => a + (r.status === "deal" ? r.dealValue ?? 0 : 0), 0);
+
+  const aRows = await db.select({ n: count() }).from(articlesView).where(eq(articlesView.tenantId, t.id));
+  const articlesTotal = Number(aRows[0]?.n ?? 0);
+
+  const cpa = chats30 > 0 ? spend30 / chats30 : 0;
+  const organicValue = clicks30 * CPC_META_RP;
+
+  const status: ClientCard["status"] =
+    clicks30 === 0 && spend30 === 0 && leads30 === 0
+      ? "belum jalan"
+      : (chats30 > 0 && cpa > BENCHMARK_CPA_CHAT_RP) || (leads30 > 0 && spend30 === 0 && clicks30 === 0)
+        ? "perlu perhatian"
+        : "sehat";
+
+  cards.push({
+    slug: t.slug, name: t.name, domain: t.domain ?? "",
+    clicks30, impr30, spend30, chats30, leads30, leadsUnik30,
+    deals30, revenue30, articles30, articlesTotal, organicValue, cpa, status,
+  });
+}
+cards.sort((a, b) => b.clicks30 + b.leads30 - (a.clicks30 + a.leads30));
+
+const totals = cards.reduce(
+  (a, c) => ({
+    clicks: a.clicks + c.clicks30,
+    impr: a.impr + c.impr30,
+    spend: a.spend + c.spend30,
+    chats: a.chats + c.chats30,
+    leads: a.leads + c.leads30,
+    leadsUnik: a.leadsUnik + c.leadsUnik30,
+    deals: a.deals + c.deals30,
+    revenue: a.revenue + c.revenue30,
+    organicValue: a.organicValue + c.organicValue,
+  }),
+  { clicks: 0, impr: 0, spend: 0, chats: 0, leads: 0, leadsUnik: 0, deals: 0, revenue: 0, organicValue: 0 },
+);
+const blendedCpa = totals.chats > 0 ? totals.spend / totals.chats : 0;
 const notes = await db.select().from(notesInternal).orderBy(desc(notesInternal.createdAt)).limit(10);
-const totals = cards.reduce((a, c) => ({ clicks: a.clicks + c.clicks30, leads: a.leads + c.leads30 }), { clicks: 0, leads: 0 });
+
 ---
 <Base title="HQ Overview" tenantName="Agency">
   <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #0B0F17 0%, #1C1917 100%); color: #fff;">
@@ -38,10 +115,13 @@ const totals = cards.reduce((a, c) => ({ clicks: a.clicks + c.clicks30, leads: a
         <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#34d399]">Agency Beriklan</div>
         <div class="mt-1 text-display text-3xl sm:text-4xl">Semua klien,<br />dalam satu layar.</div>
       </div>
-      <div class="flex gap-2 text-xs">
+      <div class="flex flex-wrap gap-2 text-xs">
         <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Klien</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up">{cards.length}</div></div>
         <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Klik 30h</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up" style="color:#FACC15">{fmtInt(totals.clicks)}</div></div>
-        <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Lead 30h</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up" style="color:#34d399">{fmtInt(totals.leads)}</div></div>
+        <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Prospek unik 30h</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up" style="color:#34d399">{fmtInt(totals.leadsUnik)}</div></div>
+        <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Spend 30h</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up" style="color:#fb923c">{fmtRp(totals.spend)}</div></div>
+        <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">CPA gabungan</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up">{totals.chats > 0 ? fmtRp(blendedCpa) : "—"}</div></div>
+        <div class="rounded-lg border border-white/15 px-3 py-2"><div class="text-[10px] text-white/50 uppercase tracking-[0.12em]">Nilai SEO 30h</div><div class="font-[family-name:var(--font-mono-num)] text-2xl font-extrabold count-up" style="color:#34d399">{fmtRp(totals.organicValue)}</div></div>
       </div>
     </div>
   </div>
@@ -59,11 +139,90 @@ const totals = cards.reduce((a, c) => ({ clicks: a.clicks + c.clicks30, leads: a
         <div class="divider-fade my-3"></div>
         <div class="grid grid-cols-2 gap-2">
           <div><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold">{fmtInt(c.clicks30)}</div><div class="text-[10px] text-[color:var(--text-faint)]">klik /30h</div></div>
-          <div><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold" class:list={[c.leads30 > 0 ? "text-[color:var(--success)]" : ""]}>{fmtInt(c.leads30)}</div><div class="text-[10px] text-[color:var(--text-faint)]">lead /30h</div></div>
+          <div><div class="font-[family-name:var(--font-mono-num)] text-xl font-extrabold" class:list={[c.leadsUnik30 > 0 ? "text-[color:var(--success)]" : ""]}>{fmtInt(c.leadsUnik30)}</div><div class="text-[10px] text-[color:var(--text-faint)]">prospek unik /30h</div></div>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
+          <span class:list={[
+            "chip !text-[9px]",
+            c.status === "sehat" ? "chip-success" : c.status === "perlu perhatian" ? "chip-warning" : "",
+          ]}>{c.status}</span>
+          {c.spend30 > 0 && <span class="chip !text-[9px]">spend {fmtRp(c.spend30)}</span>}
+          {c.chats30 > 0 && <span class="chip !text-[9px]">CPA {fmtRp(c.cpa)}</span>}
+          {c.articlesTotal > 0 && <span class="chip !text-[9px]">{fmtInt(c.articlesTotal)} artikel</span>}
         </div>
       </a>
     ))}
     {cards.length === 0 && <div class="card p-8 text-center text-sm text-[color:var(--text-faint)]">Belum ada klien.</div>}
+  </div>
+
+  <!-- TABEL PERBANDINGAN KLIEN (upgrade 24 Okt 2026) -->
+  <div class="card mt-4 overflow-hidden">
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[color:var(--border-subtle)] px-5 py-3">
+      <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Perbandingan klien <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">30 hari terakhir · klik, spend, prospek, CPA, artikel, revenue</span></h2>
+      <span class="chip text-[10px]">{cards.length} klien</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[760px] text-sm">
+        <thead>
+          <tr class="border-b border-[color:var(--border-subtle)] text-left text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-faint)]">
+            <th class="px-5 py-2.5 font-semibold">Klien</th>
+            <th class="px-3 py-2.5 text-right font-semibold">Klik</th>
+            <th class="px-3 py-2.5 text-right font-semibold">Tayang</th>
+            <th class="px-3 py-2.5 text-right font-semibold">Spend</th>
+            <th class="px-3 py-2.5 text-right font-semibold">Chat</th>
+            <th class="px-3 py-2.5 text-right font-semibold">Prospek unik</th>
+            <th class="px-3 py-2.5 text-right font-semibold">CPA</th>
+            <th class="px-3 py-2.5 text-right font-semibold">Deal</th>
+            <th class="px-3 py-2.5 text-right font-semibold">Revenue</th>
+            <th class="px-3 py-2.5 text-right font-semibold">Artikel</th>
+            <th class="px-5 py-2.5 text-right font-semibold">Nilai SEO</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-[color:var(--border-subtle)]">
+          {cards.map((c) => (
+            <tr class="transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+              <td class="px-5 py-2.5">
+                <a href={`/?tenant=${c.slug}`} class="font-medium hover:underline">{c.name}</a>
+                <div class="text-[10px] text-[color:var(--text-faint)]">{c.domain || c.slug}</div>
+              </td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(c.clicks30)}</td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)] text-[color:var(--text-muted)]">{fmtInt(c.impr30)}</td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)]">{c.spend30 > 0 ? fmtRp(c.spend30) : "—"}</td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(c.chats30)}</td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)] text-[color:var(--success)]">{fmtInt(c.leadsUnik30)}</td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)]" class:list={[c.cpa > BENCHMARK_CPA_CHAT_RP ? "text-[color:var(--c-bad)]" : ""]}>{c.cpa > 0 ? fmtRp(c.cpa) : "—"}</td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)]">{fmtInt(c.deals30)}</td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)] text-[color:var(--success)]">{c.revenue30 > 0 ? fmtRp(c.revenue30) : "—"}</td>
+              <td class="px-3 py-2.5 text-right font-[family-name:var(--font-mono-num)] text-[color:var(--text-muted)]">{fmtInt(c.articlesTotal)}</td>
+              <td class="px-5 py-2.5 text-right font-[family-name:var(--font-mono-num)] text-[color:var(--success)]">{c.organicValue > 0 ? fmtRp(c.organicValue) : "—"}</td>
+            </tr>
+          ))}
+          {cards.length === 0 && (
+            <tr><td colspan="11" class="px-5 py-6 text-center text-sm text-[color:var(--text-faint)]">Belum ada klien.</td></tr>
+          )}
+        </tbody>
+        {cards.length > 0 && (
+          <tfoot>
+            <tr class="border-t-2 border-[color:var(--border-strong)] font-[family-name:var(--font-mono-num)] text-sm font-bold">
+              <td class="px-5 py-2.5">TOTAL</td>
+              <td class="px-3 py-2.5 text-right">{fmtInt(totals.clicks)}</td>
+              <td class="px-3 py-2.5 text-right">{fmtInt(totals.impr)}</td>
+              <td class="px-3 py-2.5 text-right">{fmtRp(totals.spend)}</td>
+              <td class="px-3 py-2.5 text-right">{fmtInt(totals.chats)}</td>
+              <td class="px-3 py-2.5 text-right">{fmtInt(totals.leadsUnik)}</td>
+              <td class="px-3 py-2.5 text-right">{totals.chats > 0 ? fmtRp(blendedCpa) : "—"}</td>
+              <td class="px-3 py-2.5 text-right">{fmtInt(totals.deals)}</td>
+              <td class="px-3 py-2.5 text-right">{fmtRp(totals.revenue)}</td>
+              <td class="px-3 py-2.5 text-right">—</td>
+              <td class="px-5 py-2.5 text-right">{fmtRp(totals.organicValue)}</td>
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+    <p class="border-t border-[color:var(--border-subtle)] px-5 py-2.5 text-[10px] text-[color:var(--text-faint)]">
+      Prospek unik = satu minat per halaman/produk (bukan jumlah klik). Revenue = deal_value yang dicatat di pipeline. Nilai SEO = klik × Rp1.500 (konstanta bersama).
+    </p>
   </div>
 
   <div class="card mt-4 overflow-hidden">
