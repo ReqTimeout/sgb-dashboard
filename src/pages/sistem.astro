@@ -49,8 +49,12 @@ interface Stage {
   value: string;
   valueLabel: string;
   schedule: string;
-  status: "live" | "idle" | "pending" | "error";
+  status: "live" | "idle" | "pending" | "error" | "manual";
   cronName: string | null;
+  // Tahap manual = butuh manusia (tidak ada cron). Tidak boleh dihitung
+  // sebagai "tidak hidup" — kalau tidak, /sistem selalu tulis "9/11 stage
+  // hidup" dan terbaca seperti mesin rusak padahal 2 tahap memang manual.
+  manual?: boolean;
   desc: string;
 }
 
@@ -69,7 +73,8 @@ const stages: Stage[] = [
     value: "template-v1",
     valueLabel: "gen-from-queue",
     schedule: "manual / cron",
-    status: "idle",
+    status: "manual",
+    manual: true,
     cronName: null,
     desc: "Tahap penulisan artikel otomatis dari keyword antre. Template-based draft (0 token). Agen eksekusi via command 'gen batch' atau via cron periode.",
   },
@@ -78,7 +83,8 @@ const stages: Stage[] = [
     value: "👤",
     valueLabel: "review & quality",
     schedule: "manual oleh Bos",
-    status: "pending",
+    status: "manual",
+    manual: true,
     cronName: null,
     desc: "Artikel review singkat lalu approve publish. Atau reject/regenerate kalau belum layak.",
   },
@@ -156,7 +162,13 @@ const stages: Stage[] = [
   },
 ];
 
-const healthy = stages.filter((s) => s.status === "live").length;
+// Skor hidup dihitung HANYA atas tahap otomatis. Tahap manual (butuh Bos)
+// adalah desain, bukan kegagalan — kalau ikut dihitung, /sistem selalu tulis
+// "9/11 tahap hidup" dan angka itu terbaca seperti mesin rusak.
+const autoStages = stages.filter((s) => !s.manual);
+const manualStages = stages.filter((s) => s.manual);
+const healthy = autoStages.filter((s) => s.status === "live").length;
+const autoScore = autoStages.length > 0 ? Math.round((healthy / autoStages.length) * 100) : 0;
 
 // === SEMALAM RINGKASAN ===
 const lastDay = cronHealth.crons.find((c) => c.name === "publish-articles")?.started_at;
@@ -198,16 +210,22 @@ const selectedArticle = articles.find((a) => a.slug === selectedSlug) ?? article
       <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#A7F3D0]">Cara Kerja Mesin · hidup tiap hari</div>
       <h2 class="mt-1 text-display text-2xl sm:text-4xl">Dari keyword sampai <span style="color:#FACC15">customer chatting.</span></h2>
       <p class="mt-2 max-w-2xl text-sm text-white/80">
-        {tenant.name} · 11 tahap otomatis setiap hari. Klik node untuk lihat penjelasan · mode "Ikuti 1 artikel" untuk timeline per-artikel nyata.
+        {tenant.name} · {stages.length} tahap: {autoStages.length} otomatis + {manualStages.length} manual. Klik node untuk lihat penjelasan · mode "Ikuti 1 artikel" untuk timeline per-artikel nyata.
       </p>
       <div class="mt-3 flex flex-wrap items-center gap-3 text-xs">
         <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
           <span class="h-1.5 w-1.5 rounded-full bg-[#34D399] pulse-anim"></span>
-          <strong>{healthy}/{stages.length} stage hidup</strong>
+          <strong>{healthy}/{autoStages.length} tahap otomatis hidup</strong>
         </span>
         <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
           <Icon name="clock" size="xs" strokeWidth={2} />
           Data di-refresh tiap halaman dibuka
+        </span>
+        <span
+          class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold"
+          style={`background: color-mix(in srgb, ${autoScore >= 80 ? "#34D399" : autoScore >= 50 ? "#FACC15" : "#F87171"} 20%, transparent); color: ${autoScore >= 80 ? "#A7F3D0" : autoScore >= 50 ? "#FDE68A" : "#FECACA"};`}
+        >
+          Skor mesin {autoScore}%
         </span>
         {cronHealth.source === "admin" || cronHealth.source === "cache" ? (
           <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
@@ -259,6 +277,9 @@ const selectedArticle = articles.find((a) => a.slug === selectedSlug) ?? article
         </span>
         <span class="inline-flex items-center gap-1 rounded-full bg-yellow-50 px-2.5 py-1 font-semibold text-yellow-700">
           <span class="h-1.5 w-1.5 rounded-full bg-yellow-500"></span> menunggu
+        </span>
+        <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-500">
+          <span class="h-1.5 w-1.5 rounded-full bg-slate-400"></span> manual
         </span>
       </div>
     </div>
