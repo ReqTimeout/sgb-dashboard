@@ -24,9 +24,16 @@ const list = await recentArticles(tenant.id, 15);
 // angka antrean ≠ angka pending di admin (1.253) dan ETA meleset.
 let antreCount = 0;
 let antreTotal = 0;
+let invTotal = 0;
 try {
   const r = await getDb().select({ n: count() }).from(keywordInventory).where(and(eq(keywordInventory.tenantId, tenant.id), inArray(keywordInventory.status, ["antre"])));
   antreTotal = Number(r[0]?.n ?? 0);
+  // TOTAL inventori = SEMUA baris keyword (apa pun statusnya). Sebelumnya
+  // kartu "Inventori" memakai jumlah status "antre" (1.020) tapi labelnya
+  // "total keyword tercatat" → angka total inventori yang sebenarnya 1.413
+  // tidak pernah tampil.
+  const r0 = await getDb().select({ n: count() }).from(keywordInventory).where(eq(keywordInventory.tenantId, tenant.id));
+  invTotal = Number(r0[0]?.n ?? 0);
   const r2 = await getDb().select({ n: count() }).from(keywordInventory).where(and(
     eq(keywordInventory.tenantId, tenant.id),
     inArray(keywordInventory.status, ["antre"]),
@@ -53,7 +60,7 @@ const etaText = etaMonths(antreCount, Math.max(ratePer30d, Number(pub24?.value ?
 
 const stages = [
   { label: "Antre", value: antreCount, note: "keyword menunggu draft", tint: "var(--text-faint)" },
-  { label: "Inventori", value: antreTotal, note: "total keyword tercatat", tint: "var(--text-faint)" },
+  { label: "Inventori", value: invTotal || antreTotal, note: "total keyword tercatat", tint: "var(--text-faint)" },
   { label: "Draft", value: draftTotal?.value, note: "siap terbit", tint: "var(--warning)" },
   { label: "Terbit 24 jam", value: pub24?.value, note: "artikel baru", tint: "var(--info)" },
   { label: "Total", value: pubTotal?.value, note: "akumulasi", tint: "var(--success)" },

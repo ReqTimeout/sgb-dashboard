@@ -33,7 +33,10 @@ since.setUTCDate(since.getUTCDate() - 30);
 const [totRow] = await db
   .select({
     n: count(),
-    pages: sql<number>`COUNT(DISTINCT ${leadEvents.pageUrl})`,
+    // PENTING: page_url dibuang query string-nya. Tanpa ini satu minat yang
+    // sama (halaman produk) terhitung berkali-kali karena tiap klik punya
+    // ?utm_* / ?gclid berbeda → "prospek unik" 627 padahal minat aslinya 87.
+    pages: sql<number>`COUNT(DISTINCT SUBSTRING_INDEX(${leadEvents.pageUrl}, '?', 1))`,
   })
   .from(leadEvents)
   .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, since)));
@@ -97,6 +100,24 @@ const scored = rows.map((r) => ({
     repeatCount: clickCountByPage.get((r.pageUrl ?? "").split("?")[0]) ?? 1,
   }),
 }));
+// DEDUPE per channel: satu prospek = satu halaman/produk. Kalau orang klik
+// WA 5x di halaman yang sama, itu SATU minat, bukan 5 prospek. Tanpa ini
+// kartu channel + nilai "potensi" naik berkali lipat, dan tidak konsisten
+// dengan /hq yang memang menghitung per halaman tanpa query string.
+type Scored = (typeof scored)[number];
+function dedupeByPage(list: Scored[]): Scored[] {
+  const m = new Map<string, Scored>();
+  for (const r of list) {
+    const key = (r.pageUrl ?? "(tanpa halaman)").split("?")[0];
+    const cur = m.get(key);
+    if (!cur) { m.set(key, r); continue; }
+    const better =
+      r.sc.score > cur.sc.score ||
+      (r.sc.score === cur.sc.score && new Date(r.ts).getTime() > new Date(cur.ts).getTime());
+    if (better) m.set(key, r);
+  }
+  return [...m.values()];
+}
 const queueBase = promoActive ? scored.filter((r) => inPromo(r.pageUrl)) : scored;
 // DEDUPE: satu baris antrean = satu minat/produk, bukan satu klik. Tanpa ini
 // produk yang sama yang diklik 5x tampil 5x → antrean-"prospek" dan estimasi
@@ -123,16 +144,19 @@ const gConv = Math.round(sumRange(await series(tenant.id, "google_ads", "convers
 const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 30), 30, 0));
 
 // Statistik per channel (100% otomatis)
-interface ChStat { name: string; href: string; leads: number; est: number; hot: number; stale: number; extra: string; verdict: string; verdictCls: string; }
+interface ChStat { name: string; href: string; leads: number; clicks: number; est: number; hot: number; stale: number; extra: string; verdict: string; verdictCls: string; }
 const staleCut = Date.now() - LEAD_STALE_HOURS * 3600 * 1000;
 function chStat(name: string, href: string, extra: string): ChStat {
   const list = scored.filter((r) => r.channel === name);
-  const leads = list.length;
-  // potensi: SUM (dealValue || estValue) untuk semua lead non-batal.
+  const clicks = list.length;
+  // Prospek = minat unik per halaman (tanpa query string). Klik = event RAW.
+  const uniq = dedupeByPage(list);
+  const leads = uniq.length;
+  // potensi: SUM (dealValue || estValue) per prospek unik non-batal.
   // Status "deal" dihitung pakai dealValue riil (jika > 0) — fallback estimasi jika legacy 0.
-  const est = list.filter((r) => (r.status ?? "baru") !== "batal").reduce((a, r) => a + realized(r), 0);
-  const hot = list.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length;
-  const stale = list.filter((r) => (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < staleCut).length;
+  const est = uniq.filter((r) => (r.status ?? "baru") !== "batal").reduce((a, r) => a + realized(r), 0);
+  const hot = uniq.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length;
+  const stale = uniq.filter((r) => (r.status ?? "baru") === "baru" && new Date(r.ts).getTime() < staleCut).length;
   // Verdict: hanya muncul kalau channel punya prospek. Tanpa prospek → netral "Belum ada data".
   let verdict = "Belum ada data";
   let verdictCls = "chip";
@@ -140,7 +164,7 @@ function chStat(name: string, href: string, extra: string): ChStat {
     verdict = "Bagus";
     verdictCls = "chip chip-success";
   }
-  return { name, href, leads, est, hot, stale, extra, verdict, verdictCls };
+  return { name, href, leads, clicks, est, hot, stale, extra, verdict, verdictCls };
 }
 const mCpa = mChats > 0 ? mSpend / mChats : 0;
 const channels: ChStat[] = [
@@ -156,11 +180,13 @@ const channels: ChStat[] = [
   chStat("Referral", "/leads", "dari situs lain"),
 ].filter((c) => c.leads > 0 || ["Meta Ads", "Google Ads", "Organik"].includes(c.name));
 
-// Potensi konsisten: SUM dealValue||estValue untuk semua lead non-batal.
-const potTotal = scored.filter((r) => (r.status ?? "baru") !== "batal")
+// Potensi konsisten: SUM dealValue||estValue per PROSPEK UNIK (bukan per klik).
+// Kalau dihitung per klik, satu orang yang klik 5x di halaman sama dihitung
+// 5x → "potensi" jadi tidak masuk akal dan tidak bisa dipakai untuk keputusan.
+const potTotal = dedupeByPage(scored).filter((r) => (r.status ?? "baru") !== "batal")
   .reduce((a, r) => a + realized(r), 0);
 const best = [...channels].filter((c) => c.leads > 0).sort((a, b) => b.est - a.est)[0];
-const hotN = scored.filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length;
+const hotN = dedupeByPage(scored).filter((r) => r.sc.tier === "HOT" && (r.status ?? "baru") === "baru").length;
 
 // Revenue per channel (dari deal_value riil — kalau 0/null, tampilkan estimasi dengan label jelas)
 const revByCh = new Map<string, number>();
@@ -247,6 +273,9 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
         <div class="mt-2 flex items-baseline gap-3">
           <span class="font-[family-name:var(--font-display)] text-2xl font-extrabold">{fmtInt(c.leads)}</span>
           <span class="text-[11px] text-[color:var(--text-muted)]">prospek</span>
+          {c.clicks > c.leads && (
+            <span class="text-[10px] text-[color:var(--text-faint)]">({fmtInt(c.clicks)} klik)</span>
+          )}
           {c.est > 0 && <span class="ml-auto font-[family-name:var(--font-mono-num)] text-sm font-bold text-[color:var(--success)]">≈{fmtRpShort(c.est)}</span>}
         </div>
         <div class="mt-1 flex items-center gap-2 text-[11px] text-[color:var(--text-muted)]">
