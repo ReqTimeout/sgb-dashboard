@@ -4,6 +4,7 @@ import EmptyState from "../components/EmptyState.astro";
 import Icon from "../components/Icon.astro";
 import PipelineNode from "../components/PipelineNode.astro";
 import { fetchCronHealth, isCronHealthy } from "../lib/admin-crons";
+import { CPC_META_RP } from "../lib/constants";
 import { getRequestTenant, latestMetric, sumRange, series } from "../lib/data";
 import { fmtInt, fmtNum, formatWaktu, formatTanggal } from "../lib/insights";
 
@@ -12,9 +13,10 @@ const tenant = await getRequestTenant(Astro.url.host, Astro.url.pathname, Astro.
 if (!tenant) throw new Error("Tenant tidak ditemukan");
 
 // === DATA FETCH (semua paralel, masing-masing tahan error) ===
-const [cronHealth, kw, articlesTotal, gscClicks, gscImpr, lead30, mSpend, dailyClicks, aiRefs] = await Promise.all([
+const [cronHealth, kw, kwTotal, articlesTotal, gscClicks, gscImpr, lead30, mSpend, dailyClicks, aiRefs] = await Promise.all([
   fetchCronHealth().catch(() => ({ crons: [], fetchedAt: Date.now(), source: "fallback" as const })),
   latestMetric(tenant.id, "seo", "keywords_in_queue"),
+  latestMetric(tenant.id, "seo", "keywords_total"),
   latestMetric(tenant.id, "content", "articles_published_total"),
   series(tenant.id, "seo", "clicks", 14),
   series(tenant.id, "seo", "impressions", 14),
@@ -24,6 +26,7 @@ const [cronHealth, kw, articlesTotal, gscClicks, gscImpr, lead30, mSpend, dailyC
   latestMetric(tenant.id, "ai", "referrals_7d"),
 ]);
 const antre = Number(kw?.value ?? 0);
+const kwTotalN = Number(kwTotal?.value ?? 0);
 const articlesN = Number(articlesTotal?.value ?? 0);
 const clicks14 = sumRange(gscClicks, 14, 0);
 const impr14 = sumRange(gscImpr, 14, 0);
@@ -59,7 +62,7 @@ const stages: Stage[] = [
     schedule: "import xls / GSC harvester",
     status: antre > 0 ? "live" : "idle",
     cronName: "keyword-harvester",
-    desc: "Daftar keyword dari 3 sumber: xls longtail, GSC search terms, dan harvester 7 hari terakhir. Total 1.373 keyword hyperlocal Cilacap.",
+    desc: `Daftar keyword dari 3 sumber: xls longtail, GSC search terms, dan harvester 7 hari terakhir. Total ${fmtInt(kwTotalN)} keyword hyperlocal Cilacap, ${fmtInt(antre)} masih antre.`,
   },
   {
     n: 2, icon: "edit", title: "Draft generator",
@@ -127,11 +130,11 @@ const stages: Stage[] = [
   {
     n: 9, icon: "trend-up", title: "Klik → customer",
     value: fmtInt(clicks30),
-    valueLabel: fmtInt(clicks30 * 1500) + " nilai SEO",
+    valueLabel: fmtInt(clicks30 * CPC_META_RP) + " nilai SEO",
     schedule: "GSC push 05:00",
     status: cronByName.get("push-metrics")?.ok ? "live" : "pending",
     cronName: "push-metrics",
-    desc: "Klik dari Google masuk ke toko publik. Estimasi CPC Meta Rp1.500 per klik = total 'hemat' dari SEO.",
+    desc: "Klik dari Google masuk ke toko publik. Estimasi CPC Meta Rp1.500 per klik (konstanta bersama) = total 'hemat' dari SEO.",
   },
   {
     n: 10, icon: "send", title: "Lead WA real-time",
@@ -206,7 +209,7 @@ const selectedArticle = articles.find((a) => a.slug === selectedSlug) ?? article
           <Icon name="clock" size="xs" strokeWidth={2} />
           Data di-refresh tiap halaman dibuka
         </span>
-        {cronHealth.source === "admin" ? (
+        {cronHealth.source === "admin" || cronHealth.source === "cache" ? (
           <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1">
             <Icon name="check" size="xs" strokeWidth={2.5} />
             Sumber: live admin

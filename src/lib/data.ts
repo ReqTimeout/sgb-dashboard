@@ -172,3 +172,40 @@ export async function recentArticles(tenantId: number, limit = 20) {
   const db = getDb();
   return db.select().from(articlesView).where(eq(articlesView.tenantId, tenantId)).limit(limit);
 }
+
+/**
+ * Semua snapshot ranking dalam rentang hari — dipakai /ranking untuk
+ * menghitung Δ posisi TANPA N+1 query (dulu rankHistory dipanggil per keyword).
+ * Audit 24 Okt 2026: 280 keyword × 1 query masing-masing = 280 round-trip
+ * ke DB Coolify per render. Sekarang 1 query, semua dihitung di memory.
+ */
+export interface RankSnap {
+  keyword: string;
+  date: string;
+  position: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  pageUrl: string | null;
+}
+
+export async function rankWindow(tenantId: number, days = 8): Promise<RankSnap[]> {
+  const db = getDb();
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - days);
+  return db
+    .select({
+      keyword: rankSnapshots.keyword,
+      date: rankSnapshots.date,
+      position: rankSnapshots.position,
+      impressions: rankSnapshots.impressions,
+      clicks: rankSnapshots.clicks,
+      pageUrl: rankSnapshots.pageUrl,
+    })
+    .from(rankSnapshots)
+    .where(
+      and(
+        eq(rankSnapshots.tenantId, tenantId),
+        gte(rankSnapshots.date, since.toISOString().slice(0, 10)),
+      ),
+    );
+}

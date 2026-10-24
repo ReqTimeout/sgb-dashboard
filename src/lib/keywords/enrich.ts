@@ -1,8 +1,9 @@
 // S3: keyword intelijen — normalisasi + dedupe + klaster topikal + skor peluang.
 // Sumber kebenaran tunggal: rules dipakai oleh /api/cron/migrate-keywords & /api/ingest/snapshots.
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { keywordInventory, rankSnapshots } from "../../../drizzle/schema";
+import { buildKeywordMatcher } from "./match";
 
 // Daftar 9 hub klaster + regex deteksi sederhana (Bahasa Indonesia, bangunan).
 // Bisa di-tune tanpa breaking — lihat CLUSTERS di bawah.
@@ -188,20 +189,41 @@ export async function ensureKeywordIntelColumns(): Promise<{
     if (allRows.length === 0) return log;
 
     // Cari data GSC terbaru untuk keyword dengan rank snapshot.
-    const latestRanks = await db
-      .select({
-        keyword: rankSnapshots.keyword,
-        position: rankSnapshots.position,
-        impressions: rankSnapshots.impressions,
-        clicks: rankSnapshots.clicks,
-      })
-      .from(rankSnapshots);
-    const rankByKw = new Map<string, { position: number | null; impressions: number | null }>();
-    for (const r of latestRanks) {
-      const cur = rankByKw.get(r.keyword);
-      const better = !cur || (r.position != null && (cur.position == null || r.position < cur.position));
-      if (better) rankByKw.set(r.keyword, { position: r.position, impressions: r.impressions });
-    }
+    // PERBAIKAN 24 Okt 2026: pakai HANYA snapshot tanggal terbaru (bukan
+    // semua riwayat) + pencocokan fuzzy. Sebelumnya:
+    //  (a) semua baris rank_snapshots (8 hari × 280 query = 2.240 baris) ikut
+    //      dipetakan → posisi yang dipakai bisa dari snapshot lama;
+    //  (b) pencocokan PERSIS → hanya ±70 dari ±280 query GSC ketemu, sisanya
+    //      fallback ke heuristik priority×intent sehingga angka "peluang" di
+    //      /keywords bukan data pasar sungguhan.
+    const rankDates = await db
+      .select({ date: rankSnapshots.date })
+      .from(rankSnapshots)
+      .orderBy(desc(rankSnapshots.date))
+      .limit(1);
+    const rankDate = rankDates[0]?.date ?? null;
+    const latestRanks = rankDate
+      ? await db
+          .select({
+            keyword: rankSnapshots.keyword,
+            position: rankSnapshots.position,
+            impressions: rankSnapshots.impressions,
+            clicks: rankSnapshots.clicks,
+          })
+          .from(rankSnapshots)
+          .where(eq(rankSnapshots.date, rankDate))
+      : [];
+    // Index keyword GSC → matcher fuzzy (exact → alias → token overlap).
+    const gscMatcher = buildKeywordMatcher(
+      latestRanks.map((r) => ({
+        keyword: r.keyword,
+        normalizedKeyword: null,
+        priority: 0,
+        position: r.position,
+        impressions: r.impressions,
+        clicks: r.clicks,
+      })),
+    );
 
     // Dedup: kelompokkan per (tenant, normalized) — ambil yang ID terkecil (lama) sebagai primary.
     const groups = new Map<string, typeof allRows>();
@@ -222,7 +244,10 @@ export async function ensureKeywordIntelColumns(): Promise<{
       const cluster = detectCluster(primary.keyword);
       const intent = (primary.intent ?? detectIntent(primary.keyword) ?? null) as string | null;
       const city = (primary.city ?? detectCity(primary.keyword) ?? null);
-      const rank = rankByKw.get(primary.keyword) ?? null;
+      const gscHit = gscMatcher(primary.keyword);
+      const rank = gscHit
+        ? { position: gscHit.position ?? null, impressions: gscHit.impressions ?? null, clicks: gscHit.clicks ?? null }
+        : null;
       const opp = calcOpportunity({
         impressions: rank?.impressions,
         position: rank?.position,

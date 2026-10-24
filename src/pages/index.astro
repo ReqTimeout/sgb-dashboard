@@ -8,6 +8,7 @@ import Icon from "../components/Icon.astro";
 import { getRequestTenant, latestMetric, series, sumRange, channelStatus } from "../lib/data";
 import { delta, fmtInt, fmtNum, fmtRp, greet, fmtDay } from "../lib/insights";
 import { and, eq, gte, sql } from "drizzle-orm";
+import { CPC_META_RP, BENCHMARK_CPA_CHAT_RP, LEAD_STALE_HOURS } from "../lib/constants";
 import { getDb } from "../lib/db";
 import { leadEvents } from "../../drizzle/schema";
 
@@ -27,12 +28,18 @@ const pub = await latestMetric(tenant.id, "content", "articles_published_total")
 const pub24 = await latestMetric(tenant.id, "content", "articles_published_24h");
 const leads = await latestMetric(tenant.id, "wa", "leads");
 // E9-A2: label "14 hari" harus SUM 14 hari, bukan snapshot harian terbaru.
-const leads14 = sumRange(await series(tenant.id, "wa", "leads", 14), 14, 0);
+// Audit 24 Okt 2026: dipakai metric resmi "wa"."leads_14d" (push dari admin,
+// events WA 14 hari terakhir). Fallback ke penjumlahan series harian kalau
+// metric belum ada (mis. sebelum cron push-metrics pertama jalan).
+const leads14Metric = await latestMetric(tenant.id, "wa", "leads_14d");
+const leads14 = leads14Metric
+  ? Number(leads14Metric.value ?? 0)
+  : sumRange(await series(tenant.id, "wa", "leads", 14), 14, 0);
 const mSpend7 = sumRange(await series(tenant.id, "meta_ads", "spend", 10), 8, 2);
 const mChats7 = sumRange(await series(tenant.id, "meta_ads", "leads", 10), 8, 2);
 const gSpend7 = sumRange(await series(tenant.id, "google_ads", "spend", 10), 8, 2);
 const gStatus7 = await channelStatus(tenant.id, "google_ads", 30);
-const staleCut = new Date(Date.now() - 12 * 3600 * 1000);
+const staleCut = new Date(Date.now() - LEAD_STALE_HOURS * 3600 * 1000);
 const staleOldQ = await getDb()
   .select({ id: leadEvents.id, ts: leadEvents.ts })
   .from(leadEvents)
@@ -45,7 +52,7 @@ const staleOldN = staleOldQ.filter((r) => new Date(r.ts).getTime() < staleCut.ge
 const mCpa7 = mChats7 > 0 ? mSpend7 / mChats7 : 0;
 const channels = [
   { href: "/seo", label: "SEO", ok: sum7 > 0, warn: (d.pct ?? 0) < -10, note: sum7 > 0 ? `${fmtInt(sum7)} klik/7h` : "belum ada klik" },
-  { href: "/iklan", label: "Meta", ok: mSpend7 > 0, warn: mCpa7 > 15000, note: mSpend7 > 0 ? `${fmtRp(mCpa7)}/chat` : "tidak ada spend" },
+  { href: "/iklan", label: "Meta", ok: mSpend7 > 0, warn: mCpa7 > BENCHMARK_CPA_CHAT_RP, note: mSpend7 > 0 ? `${fmtRp(mCpa7)}/chat` : "tidak ada spend" },
   { href: "/iklan", label: "Google", ok: gSpend7 > 0, warn: false, note: gSpend7 > 0 ? `${fmtRp(gSpend7)}/7h` : gStatus7.hasRows ? "tidak ada spend" : "belum ada campaign" },
   { href: "/leads", label: "WA", ok: staleOldN === 0, warn: staleOldN > 0, note: staleOldN > 0 ? `${staleOldN} mendesak` : "pipeline bersih" },
   { href: "/konten", label: "Konten", ok: (pub?.value ?? 0) > 0, warn: false, note: pub24?.value ? `+${fmtInt(pub24.value)} kemarin` : `${fmtInt(pub?.value ?? 0)} total` },
@@ -71,9 +78,10 @@ for (let i = 13; i >= 0; i--) {
   sparkLeads.push(leadMap.get(dt.toISOString().slice(0, 10)) ?? 0);
 }
 
-// Savings: kalau organik menghasilkan X klik, dan CPC Meta ~Rp1.000,
+// Savings: kalau organik menghasilkan X klik, dan CPC Meta ~Rp1.500,
 // berarti Anda "hemat" Rp Xjt yang tidak perlu dibayar ke Meta bulan ini.
-const organicClickValue = sum7 * 1000; // estimasi nilai SEO vs paid Meta
+// Angka CPC lewat konstanta bersama (lib/constants) supaya sama di semua halaman.
+const organicClickValue = sum7 * CPC_META_RP; // estimasi nilai SEO vs paid Meta
 const trend7 = d.pct ?? 0;
 const headline = hasData
   ? `${fmtInt(sum7)} klik Google 7 hari terakhir — ${trend7 > 0 ? `naik ${Math.abs(trend7).toFixed(0)}%` : trend7 < 0 ? `turun ${Math.abs(trend7).toFixed(0)}%` : "stabil"} vs minggu lalu.`
@@ -95,7 +103,7 @@ const headline = hasData
           <div class="rounded-xl border border-white/15 px-4 py-3">
             <div class="flex items-center gap-1.5 text-[10px] text-white/55 uppercase tracking-[0.12em]">
               <span>Hemat dari organik 7 hari</span>
-              <InfoHint source="SEO · GSC 05:00" fresh="7 hari · realtime-ish" tooltip="Klik organik × Rp1.000 (estimasi CPC Meta termurah). Angka kasar pembanding, bukan penghemalian nyata." variant="info" />
+              <InfoHint source="SEO · GSC 05:00" fresh="7 hari · realtime-ish" tooltip="Klik organik × Rp1.500 (estimasi CPC Meta, konstanta bersama). Angka kasar pembanding, bukan penghemalian nyata." variant="info" />
             </div>
             <div class="font-[family-name:var(--font-display)] text-3xl font-extrabold text-[#34d399]">{fmtRp(organicClickValue)}</div>
             <div class="text-[10px] text-white/55">≈ setara biaya Meta untuk klik yg sama</div>
@@ -152,7 +160,7 @@ const headline = hasData
         <strong class="text-[color:var(--text-primary)]">Performa SEO berjalan.</strong>{" "}
         <span class="text-[color:var(--text-secondary)]">
           {sum30 > 0
-            ? `${fmtInt(sum30)} klik masuk dari Google 30 hari terakhir. Kalau pakai iklan, ini setara sekitar ${fmtRp(sum30 * 1500)} budget.`
+            ? `${fmtInt(sum30)} klik masuk dari Google 30 hari terakhir. Kalau pakai iklan, ini setara sekitar ${fmtRp(sum30 * CPC_META_RP)} budget.`
             : "Belum ada klik 30 hari — biasanya perlu 1-2 minggu setelah push GSC pertama."}
         </span>
       </p>

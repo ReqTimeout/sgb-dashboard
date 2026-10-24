@@ -5,9 +5,10 @@ import LineChartLC from "../components/LineChartLC.svelte";
 import EmptyState from "../components/EmptyState.astro";
 import InfoHint from "../components/InfoHint.astro";
 import { getRequestTenant, series, sumRange } from "../lib/data";
+import { LEAD_STALE_HOURS } from "../lib/constants";
 import { fmtInt, fmtRp } from "../lib/insights";
 import { scoreLead, fmtRpShort } from "../lib/ai/lead-score";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import { leadEvents } from "../../drizzle/schema";
 
@@ -25,13 +26,26 @@ const db = getDb();
 const since = new Date();
 since.setUTCDate(since.getUTCDate() - 30);
 
+// Total REAL: COUNT(*) tanpa LIMIT. Sebelumnya `total = rows.length` dengan
+// LIMIT 200 → judul "200 prospek" adalah artefak batas query, bukan angka.
+// 2.000 baris untuk perhitungan skor/potensi (bukan 200) supaya estimasi nilai
+// tidak terlalu rendah; angka total tetap dari COUNT().
+const [totRow] = await db
+  .select({
+    n: count(),
+    pages: sql<number>`COUNT(DISTINCT ${leadEvents.pageUrl})`,
+  })
+  .from(leadEvents)
+  .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, since)));
+const total = Number(totRow?.n ?? 0);
+const totalUnik = Number(totRow?.pages ?? 0);
 const rows = await db
   .select()
   .from(leadEvents)
   .where(and(eq(leadEvents.tenantId, tenant.id), gte(leadEvents.ts, since)))
   .orderBy(desc(leadEvents.ts))
-  .limit(200);
-const total = rows.length;
+  .limit(2000);
+const sampleTruncated = total > rows.length;
 
 // S7: filter "Dari promo" — ?promo={slug}, match pageUrl ~/promo/{slug}.
 // Daftar slug valid diambil dari promo.json toko (sama seperti /iklan).
@@ -52,23 +66,54 @@ const inPromo = (u: string | null) => !!promoActive && (u ?? "").includes(`/prom
 // Kanalisasi sumber → channel (otomatis, tanpa input)
 function toChannel(raw: string | null, pageUrl: string | null = null): string {
   const s = `${raw ?? ""} ${(pageUrl ?? "").toLowerCase()}`;
-  if (/meta|facebook|instagram|fb_|ig_/.test(s)) return "Meta Ads";
-  if (/google|gclid|cpc|(?<!promo.*)ads/.test(s)) return "Google Ads";
+  // PENTING: param Meta (gad_*) dicek SEBELUM google. Iklan Meta membawa
+  // `gclid` (Google Click ID) untuk atribusi lintas jaringan — kalau google
+  // dicek duluan, 100% lead Meta masuk channel "Google Ads" (yang tidak punya
+  // campaign) dan pipeline jadi 100% salah.
+  if (/meta|facebook|instagram|fb_|ig_|gad_source|gad_campaignid|fbclid/.test(s)) return "Meta Ads";
+  if (/google|gclid|cpc|ads\.google/.test(s)) return "Google Ads";
+  if (/tiktok|ttclid/.test(s)) return "TikTok";
   if (/promo/.test(s)) return "Promo";
-  if (/organik|organic|search|seo/.test(s)) return "Organik";
+  if (/organik|organic|search|seo|chatgpt|perplexity|gemini|claude|copilot/.test(s)) return "Organik";
   if (/referral/.test(s)) return "Referral";
   return "Langsung";
+}
+// Klik berulang pada halaman yang sama = sinyal niat tinggi (orangnya
+// memastikan produknya). Dihitung sekali di memory, lalu dipakai skoring.
+const clickCountByPage = new Map<string, number>();
+for (const r of rows) {
+  const key = (r.pageUrl ?? "").split("?")[0];
+  if (!key) continue;
+  clickCountByPage.set(key, (clickCountByPage.get(key) ?? 0) + 1);
 }
 const scored = rows.map((r) => ({
   ...r,
   channel: toChannel(r.source, r.pageUrl),
-  sc: scoreLead({ pageUrl: r.pageUrl, source: r.source, ts: r.ts, status: r.status }),
+  sc: scoreLead({
+    pageUrl: r.pageUrl,
+    source: r.source,
+    ts: r.ts,
+    status: r.status,
+    repeatCount: clickCountByPage.get((r.pageUrl ?? "").split("?")[0]) ?? 1,
+  }),
 }));
 const queueBase = promoActive ? scored.filter((r) => inPromo(r.pageUrl)) : scored;
-const queue = [...queueBase]
+// DEDUPE: satu baris antrean = satu minat/produk, bukan satu klik. Tanpa ini
+// produk yang sama yang diklik 5x tampil 5x → antrean-"prospek" dan estimasi
+// nilai CSR jadi kemah (terlihat: 5 baris identik keramik sama Rp2jt).
+const queueAll = [...queueBase]
   .filter((r) => (r.status ?? "baru") !== "batal")
-  .sort((a, b) => b.sc.score - a.sc.score)
-  .slice(0, 20);
+  .sort((a, b) => b.sc.score - a.sc.score || new Date(b.ts).getTime() - new Date(a.ts).getTime());
+const seenPage = new Set<string>();
+const queue: typeof queueAll = [];
+for (const r of queueAll) {
+  const key = (r.pageUrl ?? "(tanpa halaman)").split("?")[0];
+  if (seenPage.has(key)) continue;
+  seenPage.add(key);
+  queue.push(r);
+  if (queue.length >= 20) break;
+}
+const queueUnik = seenPage.size;
 
 // Sisi iklan (otomatis dari producer)
 const mSpend = sumRange(await series(tenant.id, "meta_ads", "spend", 30), 30, 0);
@@ -79,7 +124,7 @@ const orgClicks = Math.round(sumRange(await series(tenant.id, "seo", "clicks", 3
 
 // Statistik per channel (100% otomatis)
 interface ChStat { name: string; href: string; leads: number; est: number; hot: number; stale: number; extra: string; verdict: string; verdictCls: string; }
-const staleCut = Date.now() - 12 * 3600 * 1000;
+const staleCut = Date.now() - LEAD_STALE_HOURS * 3600 * 1000;
 function chStat(name: string, href: string, extra: string): ChStat {
   const list = scored.filter((r) => r.channel === name);
   const leads = list.length;
@@ -104,6 +149,7 @@ const channels: ChStat[] = [
       ? (mChats > 0 ? `${fmtRp(mCpa)}/chat · ${fmtRp(mSpend)} spend` : `Belum ada chat · ${fmtRp(mSpend)} spend`)
       : "Belum ada belanja iklan"),
   chStat("Google Ads", "/iklan", gSpend > 0 ? `${fmtRp(gSpend)} spend · ${gConv} konversi` : "Belum ada campaign di akun Ads"),
+  chStat("TikTok", "/iklan", "dari iklan TikTok"),
   chStat("Organik", "/seo", `${fmtInt(orgClicks)} klik gratis/30h${orgClicks === 0 ? "" : " · dari Google"}`),
   chStat("Promo", "/iklan", "dari halaman /promo/*"),
   chStat("Langsung", "/leads", "tanpa perantara"),
@@ -123,7 +169,8 @@ for (const r of scored) {
   if (r.status === "deal") {
     const ch = toChannel(r.source, r.pageUrl);
     const real = r.dealValue && r.dealValue > 0 ? r.dealValue : r.sc.estValue;
-    revByCh.set(ch, real);
+    // Akumulasi — Map.set() menimpa, jadi deal ke-2+ di channel sama hilang.
+    revByCh.set(ch, (revByCh.get(ch) ?? 0) + real);
     if (!r.dealValue || r.dealValue <= 0) revEstByCh.set(ch, (revEstByCh.get(ch) ?? 0) + 1);
   }
 }
@@ -158,7 +205,7 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
         <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Pipeline · terbaca otomatis per channel</div>
         <div class="mt-1 text-display text-2xl sm:text-3xl">
           {total > 0
-            ? `${fmtInt(total)} prospek · potensi ${fmtRpShort(potTotal)}`
+            ? `${fmtInt(totalUnik)} prospek unik · ${fmtInt(total)} klik WA · potensi ${fmtRpShort(potTotal)}`
             : "Menunggu prospek pertama dari situs"}
         </div>
         <p class="mt-2 text-sm text-white/80">
@@ -167,6 +214,11 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
               ? `Channel terbaik: ${best.name} (${fmtInt(best.leads)} prospek, potensi ${fmtRpShort(best.est)}). Status dihitung otomatis — tanpa isi form.`
               : "Data prospek mulai terbaca."
             : "Setiap klik WhatsApp di situs otomatis masuk sini lengkap dengan channel asalnya."}
+          {total > 0 && (
+            <span class="mt-1 block text-[11px] text-white/55">
+              Prospek unik = satu minat per halaman/produk. {sampleTruncated ? "Potensi dihitung dari 2.000 klik terbaru. " : ""}Total klik = semua klik tombol WhatsApp 30 hari.
+            </span>
+          )}
           <span class="ml-1 align-middle text-white/60">[<InfoHint source="Beacon situs" fresh="real-time · capi.beriklan.co.id" tooltip="Chat dari iklan Meta masuk ke WA CS — tidak lewat website, jadi tidak muncul di sini. ROAS / revenue tetap dihitung di halaman /roi." variant="info" />]</span>
         </p>
       </div>
@@ -223,7 +275,7 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
   <div class="card mt-4 overflow-hidden">
     <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
       <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Antrian prioritas <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">skor tertinggi dulu · otomatis{promoActive ? ` · filter: /promo/${promoActive}` : ""}</span></h2>
-      <span class="chip text-[10px]">{queue.length} prospek</span>
+      <span class="chip text-[10px]">{queue.length} dari {fmtInt(totalUnik)} prospek unik</span>
     </div>
     {queue.length === 0 ? (
       <div class="p-4"><EmptyState title="Belum ada prospek" message="Setiap klik WhatsApp di situs otomatis tercatat di sini lengkap dengan channel, skor, dan estimasi nilainya." mascot="peek" /></div>

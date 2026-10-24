@@ -24,6 +24,8 @@ export function scoreLead(opts: {
   source: string | null;
   ts: string | Date;
   status: string | null;
+  /** Berapa kali halaman yang sama diklik WA dalam 7 hari terakhir. */
+  repeatCount?: number;
 }): ScoredLead {
   const url = (opts.pageUrl ?? "").toLowerCase();
   const src = (opts.source ?? "").toLowerCase();
@@ -36,12 +38,19 @@ export function scoreLead(opts: {
   else if (url.includes("/blog/")) { score += 15; reasons.push("halaman artikel"); }
   else if (url) { score += 20; reasons.push("halaman situs"); }
 
-  // 2. Sumber (paid = niat lebih serius)
-  if (src.includes("meta") || src.includes("google") || src.includes("ads") || src.includes("iklan")) {
+  // 2. Sumber (paid = niat lebih serius; tapi traffic langsung ke halaman
+  //    produk juga niat tinggi — orangnya sudah sampai "tertarik" dan
+  //    klik WA sendiri tanpa biaya iklan).
+  //    Audit 24 Okt 2026: skoring lama memberi direct cuma +8 sehingga
+  //    lead paling ramai (langsung) tidak pernah bisa HOT → badge HOT
+  //    selalu 0 dan tidak berguna untuk triage.
+  if (src.includes("meta") || src.includes("google") || src.includes("ads") || src.includes("iklan") || src.includes("tiktok")) {
     score += 20; reasons.push("dari iklan");
-  } else if (src && src !== "langsung" && src !== "web") {
-    score += 12; reasons.push(`dari ${opts.source}`);
-  } else { score += 8; }
+  } else if (src && src !== "langsung" && src !== "web" && src !== "organik" && src !== "direct") {
+    score += 14; reasons.push(`dari ${opts.source}`);
+  } else {
+    score += 10; reasons.push(src ? `dari ${opts.source}` : "sumber tidak diketahui");
+  }
 
   // 3. Jam (jam toko 08-21 = siap dilayani)
   const h = new Date(opts.ts).getUTCHours() + 7; // WIB approx
@@ -53,7 +62,14 @@ export function scoreLead(opts: {
   if (ageH < 12) { score += 10; reasons.push("baru <12 jam"); }
   else if (ageH < 48) { score += 5; }
 
-  // 5. Status sudah ditangani = turun prioritas
+  // 5. Klik berulang pada halaman yang sama = niat tinggi (orang memastikan)
+  const repeat = opts.repeatCount ?? 1;
+  if (repeat >= 2) {
+    score += Math.min(12, (repeat - 1) * 4);
+    reasons.push(`klik ulang ${repeat}×`);
+  }
+
+  // 6. Status sudah ditangani = turun prioritas
   if (opts.status === "deal" || opts.status === "batal") score = Math.min(score, 20);
 
   score = Math.max(0, Math.min(100, Math.round(score)));
