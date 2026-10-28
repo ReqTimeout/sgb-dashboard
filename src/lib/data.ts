@@ -125,6 +125,40 @@ export interface RankRow {
   date: string;
 }
 
+export interface MetricMeta {
+  date: string;
+  json: Record<string, unknown>;
+}
+
+/** Baca value_json terbaru sebuah (channel, metric) — utk snapshot kategori
+ *  (traffic_sources, area_interest) yang produsernya menyimpan map di kolom json. */
+export async function latestMetricJson(
+  tenantId: number,
+  channel: string,
+  metric: string,
+): Promise<MetricMeta | null> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: dailyMetrics.date, valueJson: dailyMetrics.valueJson })
+    .from(dailyMetrics)
+    .where(
+      and(
+        eq(dailyMetrics.tenantId, tenantId),
+        eq(dailyMetrics.channel, channel),
+        eq(dailyMetrics.metric, metric),
+      ),
+    )
+    .orderBy(desc(dailyMetrics.date))
+    .limit(1);
+  if (!rows[0]) return null;
+  let j: unknown = rows[0].valueJson;
+  if (typeof j === "string") {
+    try { j = JSON.parse(j); } catch { j = null; }
+  }
+  if (!j || typeof j !== "object") return { date: rows[0].date, json: {} };
+  return { date: rows[0].date, json: j as Record<string, unknown> };
+}
+
 export async function latestRanks(tenantId: number, limit = 25): Promise<RankRow[]> {
   const db = getDb();
   const maxDate = await db

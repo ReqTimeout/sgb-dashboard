@@ -1,0 +1,162 @@
+---
+// src/pages/insight.astro — SGB 360 "Perjalanan Pengunjung" (Batch C2/C3).
+// Sumber: channel insight/local hasil producer admin push-metrics (beacon
+// first-party + UTM + area pages). BUKAN angka mentah Google/Meta — ini
+// perjalanan pengunjung di situs sendiri, di-agregasi admin lalu di-push 05:00.
+import Base from "../layouts/Base.astro";
+import StatCard from "../components/StatCard.astro";
+import BarChartLC from "../components/BarChartLC.svelte";
+import InfoHint from "../components/InfoHint.astro";
+import { getRequestTenant, series, sumRange, latestMetricJson } from "../lib/data";
+import { fmtInt, fmtDay } from "../lib/insights";
+
+const user = Astro.locals.user!;
+const tenant = await getRequestTenant(
+  Astro.url.host,
+  Astro.url.pathname,
+  Astro.url.searchParams,
+  user.role === "superadmin",
+);
+if (!tenant) throw new Error("Tenant tidak ditemukan");
+
+const days = 14;
+const vS = await series(tenant.id, "insight", "funnel_visitors", days);
+const pS = await series(tenant.id, "insight", "funnel_view_product", days);
+const wS = await series(tenant.id, "insight", "funnel_wa_click", days);
+const iS = await series(tenant.id, "insight", "funnel_inquiry", days);
+
+// Total 14 hari = PENJUMLAHAN sesi-unique per hari (bukan unique terdedup
+// lintas hari). Dipakai untuk ARAH funnel/tren, bukan presisi headcount.
+const V = Math.round(sumRange(vS, days, 0));
+const P = Math.round(sumRange(pS, days, 0));
+const W = Math.round(sumRange(wS, days, 0));
+const I = Math.round(sumRange(iS, days, 0));
+const hasFunnel = V > 0 || W > 0 || I > 0;
+
+const funnel = [
+  { label: "Pengunjung", value: V, note: "sesi buka situs" },
+  { label: "Lihat produk", value: P, note: "buka /produk atau /kategori" },
+  { label: "Klik WhatsApp", value: W, note: "tekan tombol order WA" },
+  { label: "Inquiry masuk", value: I, note: "form/WA tercatat" },
+];
+const rate = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "—");
+const overallConv = rate(I, V);
+
+const trend = vS.slice(-days).map((p) => ({ label: fmtDay(p.date), value: p.value }));
+
+const srcMeta = await latestMetricJson(tenant.id, "insight", "traffic_sources");
+const srcData = Object.entries(srcMeta?.json ?? {})
+  .map(([k, v]) => ({ label: k, value: Number(v) || 0 }))
+  .sort((a, b) => b.value - a.value)
+  .slice(0, 8);
+const srcUnidentified = Number(srcMeta?.json?.["belum teridentifikasi"] ?? 0);
+
+const localMeta = await latestMetricJson(tenant.id, "local", "area_interest");
+const localData = Object.entries(localMeta?.json ?? {})
+  .map(([k, v]) => ({ label: k, value: Number(v) || 0 }))
+  .sort((a, b) => b.value - a.value)
+  .slice(0, 10);
+---
+
+<Base title="Insight 360" tenantName={tenant.name}>
+  <div class="relative overflow-hidden rounded-2xl px-6 py-5 grain" style="background: linear-gradient(135deg, #1C1917 0%, #292524 100%); color: #fff;">
+    <div class="hazard-stripe absolute inset-x-0 top-0"></div>
+    <div class="pointer-events-none absolute -top-20 -right-16 h-72 w-72 rounded-full" style="background: radial-gradient(circle, rgb(20 184 166 / 0.22), transparent 70%)"></div>
+    <div class="relative z-10">
+      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#FACC15]">Perjalanan pengunjung · {days} hari</div>
+      <h2 class="mt-2 text-display text-2xl sm:text-3xl">360° dari kunjungan sampai order.</h2>
+      <p class="mt-2 max-w-2xl text-sm text-white/85">
+        {hasFunnel
+          ? `Dari ${fmtInt(V)} sesi, ${fmtInt(W)} klik WhatsApp, ${fmtInt(I)} inquiry masuk — konversi keseluruhan ${overallConv}. Data beacon first-party situs sendiri, di-agregasi admin tiap 05:00 WIB.`
+          : `Belum ada data beacon ter-push periode ini. Pastikan cron push-metrics admin berjalan dan beacon publik situs aktif.`}
+      </p>
+    </div>
+  </div>
+
+  {hasFunnel && (
+    <div class="card mt-4 overflow-hidden">
+      <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">
+          Alur pengunjung
+          <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">kunjungan → produk → WhatsApp → order</span>
+        </h2>
+        <span class="chip text-[10px]">Beacon · {days} hari</span>
+      </div>
+      <div class="grid grid-cols-2 gap-2 p-4 lg:grid-cols-4">
+        {funnel.map((f, i) => (
+          <div class="relative rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/50 p-3">
+            {i > 0 && (
+              <span class="absolute -top-2 left-3 rounded-full bg-[color:var(--success)] px-1.5 py-px text-[9px] font-bold text-white">{rate(f.value, funnel[i - 1].value)}</span>
+            )}
+            <div class="flex items-center justify-between gap-1">
+              <span class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--text-faint)]">{String(i + 1).padStart(2, "0")} · {f.label}</span>
+              <InfoHint source="beacon page_view" tooltip="Penjumlahan sesi-unique harian 14 hari — arah tren, bukan headcount terdedup lintas hari." variant="info" />
+            </div>
+            <div class="mt-1 font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-tight">{fmtInt(f.value)}</div>
+            <div class="mt-0.5 text-[10px] leading-snug text-[color:var(--text-muted)]">{f.note}</div>
+          </div>
+        ))}
+      </div>
+      <p class="border-t border-[color:var(--border-subtle)] px-5 py-2.5 text-[11px] text-[color:var(--text-faint)]">Persentase hijau = tingkat lolos ke tahap berikutnya. Sumber: event beacon (page_view, wa_click, inquiry) yang di-push admin.</p>
+    </div>
+  )}
+
+  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <StatCard label="Sesi (14 hari)" value={fmtInt(V)} spark={trend.map((t) => t.value)} ok={V > 0} source="Σ funnel_visitors harian · beacon" hint="total 14 hari" />
+    <StatCard label="Klik WhatsApp" value={fmtInt(W)} ok={W > 0} source="Σ funnel_wa_click · beacon" hint="tekan tombol order" />
+    <StatCard label="Inquiry" value={fmtInt(I)} ok={I > 0} source="Σ funnel_inquiry harian" hint="order/pertanyaan masuk" />
+    <StatCard label="Konversi kunjungan→order" value={overallConv} ok={I > 0} warn={hasFunnel && I === 0} source="inquiry ÷ pengunjung" hint="arah, bukan presisi" />
+  </div>
+
+  <div class="mt-4 grid gap-4 lg:grid-cols-2">
+    <div class="card overflow-hidden">
+      <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Tren pengunjung</h2>
+        <span class="chip text-[10px]">harian · {trend.length} hari</span>
+      </div>
+      <div class="p-4">
+        {trend.length === 0 ? (
+          <p class="py-6 text-center text-sm text-[color:var(--text-faint)]">Belum ada data tren.</p>
+        ) : (
+          <BarChartLC data={trend} height={200} barClass="fill-[#DC2626]" />
+        )}
+      </div>
+    </div>
+
+    <div class="card overflow-hidden">
+      <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">Sumber traffic</h2>
+        <InfoHint source="traffic_source beacon + UTM" fresh={srcMeta?.date ?? undefined} tooltip="Bucket dari payload traffic_source beacon (fallback utm_source). 'belum teridentifikasi' = sesi tanpa UTM — jangan diartikan organik." variant="info" />
+      </div>
+      <div class="p-4">
+        {srcData.length === 0 ? (
+          <p class="py-6 text-center text-sm text-[color:var(--text-faint)]">Belum ada snapshot sumber.</p>
+        ) : (
+          <>
+            <BarChartLC data={srcData} height={200} barClass="fill-[#0D9488]" />
+            {srcUnidentified > 0 && (
+              <p class="mt-2 text-[11px] text-[color:var(--text-faint)]"><b>{fmtInt(srcUnidentified)}</b> sesi belum teridentifikasi (tanpa UTM) — akurasi bergantung penandaan UTM kampanye.</p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+
+    <div class="card overflow-hidden lg:col-span-2">
+      <div class="flex items-center justify-between border-b border-[color:var(--border-subtle)] px-5 py-3">
+        <h2 class="font-[family-name:var(--font-heading)] text-sm font-bold">
+          Sebaran minat lokal
+          <span class="font-[family-name:var(--font-body)] text-xs font-normal text-[color:var(--text-faint)]">estimasi dari halaman /area/ + alamat inquiry</span>
+        </h2>
+        <InfoHint source="area pages + customer_address" fresh={localMeta?.date ?? undefined} tooltip="Estimasi dari sinyal first-party (kecamatan yang dibuka via /area/, disebut di alamat). BUKAN geolokasi perangkat." variant="info" />
+      </div>
+      <div class="p-4">
+        {localData.length === 0 ? (
+          <p class="py-6 text-center text-sm text-[color:var(--text-faint)]">Belum ada sinyal lokasi (halaman area / alamat inquiry).</p>
+        ) : (
+          <BarChartLC data={localData} height={240} barClass="fill-[#F59E0B]" />
+        )}
+      </div>
+    </div>
+  </div>
+</Base>
