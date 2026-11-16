@@ -4,7 +4,7 @@ import { SESSION_COOKIE, validateSession } from "./lib/auth/session";
 // Publik: login + API auth + ingest (auth via X-Ingest-Key sendiri) + health + cron (auth via ?token sendiri).
 // S7: /api/iklan/ SENGAJA tidak publik — action.ts butuh locals.user (session) untuk
 // audit_log actor + guard login. (Sebelumnya publik → locals.user selalu null → 401 permanen.)
-const PUBLIC_PREFIXES = ["/login", "/api/auth/", "/api/ingest/", "/api/health", "/api/cron/", "/api/pipeline/", "/api/audit/", "/api/copilot/"];
+const PUBLIC_PREFIXES = ["/login", "/api/auth/", "/api/ingest/", "/api/health", "/api/cron/", "/api/pipeline/", "/api/audit/", "/api/copilot/", "/api/csp-report"];
 
 // CSRF sendiri (pengganti Astro checkOrigin yang dimatikan di astro.config.mjs):
 // request non-GET harus punya Origin/Referer cocok APP_URL. Tanpa header (curl/ops) diizinkan.
@@ -23,12 +23,23 @@ function csrfOk(request: Request): boolean {
   return false;
 }
 
+// CSP bertahap (AG-08): enforcing minimal = directive yang pasti tidak break
+// Astro/Svelte (tanpa script-src/style-src sehingga inline script/style tetap jalan).
+// Report-Only = policy penuh target, observasi pelanggaran via /api/csp-report dulu
+// sebelum di-enforce (phase 2: ganti unsafe-inline -> nonce, pindah Report-Only -> enforcing).
+const CSP_ENFORCE =
+  "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; upgrade-insecure-requests";
+const CSP_REPORT_ONLY =
+  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; report-uri /api/csp-report";
+
 function withSecurityHeaders(res: Response): Response {
   res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   res.headers.set("X-Frame-Options", "SAMEORIGIN");
   res.headers.set("X-Content-Type-Options", "nosniff");
   res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   res.headers.set("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  res.headers.set("Content-Security-Policy", CSP_ENFORCE);
+  res.headers.set("Content-Security-Policy-Report-Only", CSP_REPORT_ONLY);
   return res;
 }
 
