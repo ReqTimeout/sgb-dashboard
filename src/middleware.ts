@@ -32,11 +32,30 @@ function withSecurityHeaders(res: Response): Response {
   return res;
 }
 
+// A6: path probe/scanner (.env, wp-*, .git, admin.php, ekstensi berbahaya) → 404,
+// bukan 302 ke /login (302 mengonfirmasi app ada + membocorkan halaman login).
+// Route asli app (/seo, /api/*, /_astro/*, aset) TIDAK cocok → tetap alur normal.
+const PROBE_EXT =
+  /\.(php|asp|aspx|jsp|cgi|sql|bak|backup|old|orig|swp|swo|tar|tgz|gz|zip|rar|7z|log|ini|conf|cfg|env|git|svn|hg)$/i;
+const PROBE_PATH =
+  /(^|\/)(wp-login|wp-admin|wp-content|wp-includes|xmlrpc|administrator|phpmyadmin|pma|mysql|actuator|debug|console|server-status|server-info|boaform|HNAP1|cgi-bin|vendor|_profiler|telescope|solr|druid|nacos|composer\.(json|lock)|package\.json|admin\.php)(\/|$)/i;
+function isProbe(pathname: string): boolean {
+  const p = pathname.toLowerCase();
+  if (PROBE_EXT.test(p)) return true;
+  if (PROBE_PATH.test(p)) return true;
+  // segmen dotfile (.env/.git/.aws/.ssh/.htaccess/.DS_Store) kecuali .well-known
+  if (/(^|\/)\.(?!well-known)/.test(p)) return true;
+  return false;
+}
+
 export const onRequest = defineMiddleware(async (context, next) => {
   if (!csrfOk(context.request)) {
     return withSecurityHeaders(new Response("Forbidden (CSRF)", { status: 403 }));
   }
   const { pathname } = context.url;
+  if (isProbe(pathname)) {
+    return withSecurityHeaders(new Response("Not Found", { status: 404 }));
+  }
   if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
     return withSecurityHeaders(await next());
   }
