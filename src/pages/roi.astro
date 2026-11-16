@@ -64,17 +64,32 @@ const roas = totalSpend > 0 && revenue > 0 ? revenue / totalSpend : 0;
 const organicValue = orgClicks * CPC_META_RP;
 
 const pct = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(a / b < 0.1 ? 1 : 0)}%` : "—");
+const ratio = (a: number, b: number) => (b > 0 ? a / b : null);
+// Warna badge konversi mengikuti rasio lolos (bukan selalu hijau): sedikit yang lolos = merah.
+const convTone = (r: number | null) => (r == null ? null : r >= 0.5 ? "success" : r >= 0.2 ? "warning" : "danger");
 
 // Funnel Meta: belanja → klik → chat → dibalas → deal → revenue
 // Tiap stage punya `source` ringkas untuk chip InfoHint.
-const funnel: { label: string; value: string; sub: string; conv: string | null; source: string }[] = [
-  { label: "Belanja iklan", value: fmtRp(mSpend), sub: "30 hari · ACTIVE", conv: null, source: "Meta Insights · 05:30 WIB" },
-  { label: "Klik iklan", value: fmtInt(mClicks), sub: `CPC ${mClicks ? fmtRp(Math.round(mSpend / mClicks)) : "—"}`, conv: pct(mClicks, 0), source: "Meta Insights · 05:30 WIB" },
-  { label: "Chat WhatsApp", value: fmtInt(mChats), sub: `CPA ${mChats ? fmtRp(Math.round(mSpend / mChats)) : "—"} · chat dari iklan (CTWA, langsung ke WA CS, tidak lewat website)`, conv: pct(mChats, mClicks), source: "Meta Insights · 05:30 WIB" },
-  { label: "Dibalas", value: fmtInt(mReplied), sub: "CS merespons chat WA", conv: pct(mReplied, mChats), source: "Meta Insights · 05:30 WIB" },
-  { label: "Deal", value: fmtInt(dealCount), sub: "tercatat di pipeline", conv: pct(dealCount, mReplied), source: "Pipeline /leads · manual" },
-  { label: "Revenue", value: fmtRp(revenue), sub: roas > 0 ? `ROAS ${roas.toFixed(1)}×` : "nilai deal", conv: null, source: `Pipeline ${dealsWithValue}/${dealCount} nilai riil · ${hasEstimate > 0 ? `lainnya ≈ estimasi` : "semua riil"}` },
+const funnel: { label: string; value: string; sub: string; conv: string | null; ratio: number | null; source: string }[] = [
+  { label: "Belanja iklan", value: fmtRp(mSpend), sub: "30 hari · ACTIVE", conv: null, ratio: null, source: "Meta Insights · 05:30 WIB" },
+  { label: "Klik iklan", value: fmtInt(mClicks), sub: `CPC ${mClicks ? fmtRp(Math.round(mSpend / mClicks)) : "—"}`, conv: pct(mClicks, 0), ratio: null, source: "Meta Insights · 05:30 WIB" },
+  { label: "Chat WhatsApp", value: fmtInt(mChats), sub: `CPA ${mChats ? fmtRp(Math.round(mSpend / mChats)) : "—"} · chat dari iklan (CTWA, langsung ke WA CS, tidak lewat website)`, conv: pct(mChats, mClicks), ratio: ratio(mChats, mClicks), source: "Meta Insights · 05:30 WIB" },
+  { label: "Dibalas", value: fmtInt(mReplied), sub: "CS merespons chat WA", conv: pct(mReplied, mChats), ratio: ratio(mReplied, mChats), source: "Meta Insights · 05:30 WIB" },
+  { label: "Deal", value: fmtInt(dealCount), sub: "tercatat di pipeline", conv: pct(dealCount, mReplied), ratio: ratio(dealCount, mReplied), source: "Pipeline /leads · manual" },
+  { label: "Revenue", value: fmtRp(revenue), sub: roas > 0 ? `ROAS ${roas.toFixed(1)}×` : "nilai deal", conv: null, ratio: null, source: `Pipeline ${dealsWithValue}/${dealCount} nilai riil · ${hasEstimate > 0 ? `lainnya ≈ estimasi` : "semua riil"}` },
 ];
+
+// Deteksi bocor terbesar: transisi dengan kehilangan absolut terbanyak (hulu > 0).
+// Atribusi sumber jujur — "Dibalas" pakai Meta chat_replied, "Deal" pakai pipeline manual.
+const transitions = [
+  { from: "Klik iklan", to: "Chat WhatsApp", up: mClicks, down: mChats, src: "Meta Insights" },
+  { from: "Chat WhatsApp", to: "Dibalas", up: mChats, down: mReplied, src: "Meta chat_replied" },
+  { from: "Dibalas", to: "Deal", up: mReplied, down: dealCount, src: "Meta chat_replied → pipeline manual" },
+];
+const leak = transitions.filter((t) => t.up > 0 && t.up - t.down > 0).sort((a, b) => (b.up - b.down) - (a.up - a.down))[0] ?? null;
+const leakLost = leak ? leak.up - leak.down : 0;
+const leakPct = leak && leak.up > 0 ? Math.round((leakLost / leak.up) * 100) : 0;
+const leakTone = leakPct >= 80 ? "danger" : "warning";
 
 let headline = "";
 if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
@@ -137,8 +152,8 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
     <div class="grid grid-cols-2 gap-2 p-4 sm:grid-cols-3 lg:grid-cols-6">
       {funnel.map((f, i) => (
         <div class="relative rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-2)]/50 p-3">
-          {f.conv && (
-            <span class="absolute -top-2 left-3 rounded-full bg-[color:var(--success)] px-1.5 py-px text-[9px] font-bold text-white">{f.conv}</span>
+          {f.conv && f.ratio != null && (
+            <span class="absolute -top-2 left-3 rounded-full px-1.5 py-px text-[9px] font-bold text-white" style={`background: var(--${convTone(f.ratio)})`} title={`${f.conv} lolos ke tahap berikutnya`}>{f.conv}</span>
           )}
           <div class="flex items-center justify-between gap-1">
             <span class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--text-faint)]">{String(i + 1).padStart(2, "0")} · {f.label}</span>
@@ -149,7 +164,25 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
         </div>
       ))}
     </div>
-    <p class="border-t border-[color:var(--border-subtle)] px-5 py-2.5 text-[11px] text-[color:var(--text-faint)]">Persentase hijau = tingkat lolos ke tahap berikutnya. Deal dan revenue tercatat manual di <a class="text-[color:var(--info)] hover:underline" href="/leads">pipeline</a>.</p>
+    {leak && leakPct >= 50 && (
+      <div class="mx-4 mb-3 flex items-start gap-3 rounded-xl border p-3" style={`border-color: var(--${leakTone}); background: var(--${leakTone}-soft);`}>
+        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white" style={`background: var(--${leakTone});`}>
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        </span>
+        <div class="flex-1">
+          <div class="text-sm font-bold" style={`color: var(--${leakTone});`}>Bocor terbesar: {leak.from} → {leak.to}</div>
+          <div class="mt-0.5 text-[12px] leading-snug text-[color:var(--text-secondary)]">
+            <strong>{fmtInt(leakLost)}</strong> dari {fmtInt(leak.up)} ({leakPct}%) tidak lolos ke tahap berikutnya · sumber {leak.src}.
+            {leak.to === "Dibalas"
+              ? " Pastikan CS membalas chat WA dan responsnya tercatat — ini peluang revenue yang hilang."
+              : leak.to === "Deal"
+                ? " Catat deal beserta nilainya di pipeline agar revenue dan ROAS tampil."
+                : " Tinjau kualitas targeting dan creative iklan."}
+          </div>
+        </div>
+      </div>
+    )}
+    <p class="border-t border-[color:var(--border-subtle)] px-5 py-2.5 text-[11px] text-[color:var(--text-faint)]">Badge = tingkat lolos ke tahap berikutnya (hijau ≥50%, kuning 20–49%, merah &lt;20%). Deal dan revenue tercatat manual di <a class="text-[color:var(--info)] hover:underline" href="/leads">pipeline</a>.</p>
   </div>
 
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
