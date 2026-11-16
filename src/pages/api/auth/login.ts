@@ -26,7 +26,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   const password = String(form.get("password") ?? "");
   const next = String(form.get("next") ?? "/");
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const safeNext = /^\/(?![/\\\s])/.test(next) ? next : "/";
 
   let ok = false;
   try {

@@ -23,13 +23,22 @@ function csrfOk(request: Request): boolean {
   return false;
 }
 
+function withSecurityHeaders(res: Response): Response {
+  res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.headers.set("X-Frame-Options", "SAMEORIGIN");
+  res.headers.set("X-Content-Type-Options", "nosniff");
+  res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.headers.set("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  return res;
+}
+
 export const onRequest = defineMiddleware(async (context, next) => {
   if (!csrfOk(context.request)) {
-    return new Response("Forbidden (CSRF)", { status: 403 });
+    return withSecurityHeaders(new Response("Forbidden (CSRF)", { status: 403 }));
   }
   const { pathname } = context.url;
   if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
-    return next();
+    return withSecurityHeaders(await next());
   }
   const sessionId = context.cookies.get(SESSION_COOKIE)?.value;
   let user = null;
@@ -40,8 +49,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     console.error("[middleware] validateSession failed:", err);
   }
   if (!user) {
-    return context.redirect(`/login?next=${encodeURIComponent(pathname)}`, 302);
+    return withSecurityHeaders(context.redirect(`/login?next=${encodeURIComponent(pathname)}`, 302));
   }
   context.locals.user = user;
-  return next();
+  return withSecurityHeaders(await next());
 });
