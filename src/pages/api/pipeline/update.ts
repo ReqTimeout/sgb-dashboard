@@ -67,8 +67,9 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
     if (!rows[0]) return new Response("Lead tidak ditemukan", { status: 404 });
     const was = rows[0];
     const newStatus = parsed.data.status;
-    // OTOMATIS: deal tanpa nilai eksplisit → isi estimasi dari skor halaman (fallback ke nilai sebelumnya > 0).
-    // "0" dan null keduanya berarti "klik tombol Deal cepat", bukan "transaksi nol rupiah".
+    // B1.1: deal tanpa nilai riil → dealValue null (TIDAK auto-isi estimasi).
+    // ROAS /roi & CAPI Purchase hanya dari nilai riil agar tidak menyesatkan.
+    // "0"/null = "tandai deal, nilai belum diinput" → potensi /leads tetap pakai estimasi.
     let dealValue: number | null = null;
     if (newStatus === "deal") {
       const provided = parsed.data.deal_value;
@@ -77,8 +78,7 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
       } else if (was.dealValue && was.dealValue > 0) {
         dealValue = was.dealValue;
       } else {
-        const { scoreLead } = await import("../../../lib/ai/lead-score");
-        dealValue = scoreLead({ pageUrl: was.pageUrl, source: was.source, ts: was.ts, status: was.status }).estValue;
+        dealValue = null;
       }
     }
     await db

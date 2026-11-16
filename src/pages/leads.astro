@@ -311,7 +311,7 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
     ) : (
     <ul class="divide-y divide-[color:var(--border-subtle)]">
       {queue.map((r) => (
-        <li class="flex items-center gap-3 px-5 py-2.5 text-sm transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
+        <li class="flex flex-wrap items-center gap-3 px-5 py-2.5 text-sm transition-colors hover:bg-[color:var(--bg-surface-2)]/60">
           <span class:list={[tierChip(r.sc.tier), "!text-[9px] shrink-0"]}>{r.sc.tier} {r.sc.score}</span>
           <div class="min-w-0 flex-1">
             <div class="truncate font-medium">{shortPage(r.pageUrl)}</div>
@@ -324,11 +324,22 @@ const tierChip = (t: string) => t === "HOT" ? "chip chip-danger" : t === "WARM" 
           <span class="hidden font-[family-name:var(--font-mono-num)] text-xs font-bold text-[color:var(--success)] sm:inline">
             {(r.status ?? "baru") === "deal" && r.dealValue && r.dealValue > 0 ? fmtRpShort(r.dealValue) : `≈${fmtRpShort(r.sc.estValue)}`}
           </span>
+          {(r.status ?? "baru") === "dibalas" && <span class="chip chip-warning shrink-0 !text-[9px]">DIBALAS</span>}
           {canDeal && (r.status ?? "baru") !== "deal" && (r.status ?? "baru") !== "batal" && (
-            <form method="post" action="/api/pipeline/update">
-              <input type="hidden" name="id" value={r.id} />
-              <button name="status" value="deal" type="submit" title="Tandai deal (nilai otomatis dari estimasi)" class="btn shrink-0 !py-1 !text-[11px]">✓ Deal</button>
-            </form>
+            <details class="basis-full shrink-0 sm:basis-auto">
+              <summary class="btn !py-1 !text-[11px] cursor-pointer list-none select-none">Tandai ▾</summary>
+              <form method="post" action="/api/pipeline/update" class="mt-2 grid gap-1.5 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] p-2.5 sm:w-56">
+                <input type="hidden" name="id" value={r.id} />
+                <div class="flex gap-1.5">
+                  <button name="status" value="dibalas" type="submit" class="btn flex-1 !py-1 !text-[11px]">Dibalas</button>
+                  <button name="status" value="batal" type="submit" class="btn flex-1 !py-1 !text-[11px]">Batal</button>
+                </div>
+                <input type="number" name="deal_value" min="0" step="1000" inputmode="numeric" placeholder="Nilai deal riil (Rp)" class="w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--bg-canvas)] px-2 py-1.5 font-[family-name:var(--font-mono-num)] text-[12px]" />
+                <input type="text" name="note" maxlength="500" placeholder="Catatan (opsional)" class="w-full rounded-md border border-[color:var(--border-default)] bg-[color:var(--bg-canvas)] px-2 py-1.5 text-[12px]" />
+                <button name="status" value="deal" type="submit" class="btn btn-primary !py-1 !text-[11px]">✓ Simpan Deal</button>
+                <p class="text-[9px] leading-snug text-[color:var(--text-faint)]">Nilai riil dipakai untuk ROAS & dikirim ke Meta. Kosongkan = deal ditandai, nilai menyusul.</p>
+              </form>
+            </details>
           )}
           {(r.status ?? "baru") === "deal" && <span class="chip chip-success shrink-0 !text-[9px]">DEAL</span>}
         </li>
