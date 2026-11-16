@@ -1,7 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
 import Icon from "../components/Icon.astro";
-const next = Astro.url.searchParams.get("next") ?? "/";
+const rawNext = Astro.url.searchParams.get("next") ?? "/";
+const next = /^\/(?![/\\\s])/.test(rawNext) ? rawNext : "/";
 const err = Astro.url.searchParams.get("err");
 ---
 <Base title="Masuk" bare>
