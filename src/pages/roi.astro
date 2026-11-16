@@ -37,25 +37,27 @@ const since = new Date();
 since.setUTCDate(since.getUTCDate() - 30);
 const db = getDb();
 const dealAgg = await db
-  .select({ n: sql<number>`COUNT(*)`, sum: sql<number>`COALESCE(SUM(${leadEvents.dealValue}), 0)` })
+  .select({
+    n: sql<number>`COUNT(*)`,
+    realSum: sql<number>`COALESCE(SUM(CASE WHEN ${leadEvents.valueSource} = 'manual' THEN ${leadEvents.dealValue} ELSE 0 END), 0)`,
+    estSum: sql<number>`COALESCE(SUM(CASE WHEN ${leadEvents.valueSource} = 'auto' THEN ${leadEvents.dealValue} ELSE 0 END), 0)`,
+    manualN: sql<number>`SUM(CASE WHEN ${leadEvents.valueSource} = 'manual' THEN 1 ELSE 0 END)`,
+    autoN: sql<number>`SUM(CASE WHEN ${leadEvents.valueSource} = 'auto' THEN 1 ELSE 0 END)`,
+  })
   .from(leadEvents)
   .where(and(eq(leadEvents.tenantId, tenant.id), eq(leadEvents.status, "deal"), gte(leadEvents.ts, since)));
 const dealCount = Number(dealAgg[0]?.n ?? 0);
-const revenue = Number(dealAgg[0]?.sum ?? 0);
+const revenue = Number(dealAgg[0]?.realSum ?? 0);
+const estimateRevenue = Number(dealAgg[0]?.estSum ?? 0);
 const dealRows = await db
-  .select({ source: leadEvents.source, sum: sql<number>`COALESCE(SUM(${leadEvents.dealValue}), 0)` })
+  .select({ source: leadEvents.source, sum: sql<number>`COALESCE(SUM(CASE WHEN ${leadEvents.valueSource} = 'manual' THEN ${leadEvents.dealValue} ELSE 0 END), 0)` })
   .from(leadEvents)
   .where(and(eq(leadEvents.tenantId, tenant.id), eq(leadEvents.status, "deal"), gte(leadEvents.ts, since)))
   .groupBy(leadEvents.source);
 
-// S1: hitung deal_value nyata vs estimasi (untuk bintang penanda transparansi).
-// Ambil list deal dengan dealValue riil > 0 (estimator tidak dipakai)
-const dealReal = await db
-  .select({ v: leadEvents.dealValue })
-  .from(leadEvents)
-  .where(and(eq(leadEvents.tenantId, tenant.id), eq(leadEvents.status, "deal"), gte(leadEvents.ts, since)));
-const dealsWithValue = dealReal.filter((r) => r.v != null && r.v > 0).length;
-const hasEstimate = dealCount - dealsWithValue;
+// S1/B1: deal riil (value_source=manual) vs estimasi (auto). ROAS hanya dari riil.
+const dealsWithValue = Number(dealAgg[0]?.manualN ?? 0);
+const hasEstimate = Number(dealAgg[0]?.autoN ?? 0);
 
 const totalSpend = mSpend + gSpend;
 const totalLeads = mChats + gConv;
@@ -100,7 +102,7 @@ if (totalSpend === 0 && totalLeads === 0 && orgClicks === 0) {
   headline = `Tanpa belanja iklan, ${fmtInt(orgClicks)} kunjungan organik senilai ${fmtRp(organicValue)} datang gratis dari Google.`;
 } else if (dealCount > 0 && revenue === 0) {
   // S1: deal tercatat tapi revenue Rp0 → kemungkinan nilai belum diinput / auto-estimasi kosong.
-  headline = `${fmtRp(totalSpend)} belanja iklan menghasilkan ${fmtInt(totalLeads)} prospek. ${fmtInt(dealCount)} transaksi tercatat, ${dealsWithValue} di antaranya sudah punya nilai riil. ${hasEstimate > 0 ? `Sisanya (${fmtInt(hasEstimate)} deal) diestimasi otomatis — tim bisa update manual di /leads.` : "Tandai nilai deal di pipeline agar ROAS tampil."}`;
+  headline = `${fmtRp(totalSpend)} belanja iklan menghasilkan ${fmtInt(totalLeads)} prospek. ${fmtInt(dealCount)} transaksi tercatat, ${dealsWithValue} di antaranya sudah punya nilai riil. ${hasEstimate > 0 ? `Sisanya (${fmtInt(hasEstimate)} deal ≈ ${fmtRp(estimateRevenue)}) masih estimasi — isi nilai riil di /leads agar ROAS akurat.` : "Tandai nilai deal di pipeline agar ROAS tampil."}`;
 } else {
   headline = `${fmtRp(totalSpend)} belanja iklan menghasilkan ${fmtInt(totalLeads)} prospek. ${fmtInt(mReplied)} di antaranya merespons — catat nilai transaksinya di pipeline agar ROAS tampil di sini.`;
 }

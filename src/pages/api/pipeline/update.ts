@@ -71,14 +71,18 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
     // ROAS /roi & CAPI Purchase hanya dari nilai riil agar tidak menyesatkan.
     // "0"/null = "tandai deal, nilai belum diinput" → potensi /leads tetap pakai estimasi.
     let dealValue: number | null = null;
+    let valueSource: string | null = null;
     if (newStatus === "deal") {
       const provided = parsed.data.deal_value;
       if (provided && provided > 0) {
         dealValue = provided;
+        valueSource = "manual";
       } else if (was.dealValue && was.dealValue > 0) {
         dealValue = was.dealValue;
+        valueSource = was.valueSource ?? "auto";
       } else {
         dealValue = null;
+        valueSource = null;
       }
     }
     await db
@@ -86,6 +90,7 @@ export const POST: APIRoute = async ({ request, cookies, url, redirect }) => {
       .set({
         status: newStatus,
         dealValue,
+        valueSource,
         note: parsed.data.note ?? was.note,
         updatedAt: new Date(),
       })

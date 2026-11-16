@@ -72,6 +72,7 @@ export const leadEvents = mysqlTable("lead_events", {
   value: double("value"),
   status: varchar("status", { length: 16 }).notNull().default("baru"), // baru | dibalas | deal | batal
   dealValue: int("deal_value"), // nilai rupiah saat deal
+  valueSource: varchar("value_source", { length: 16 }), // manual (riil) | auto (estimasi) | null — ROAS hanya hitung manual
   note: varchar("note", { length: 500 }),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
